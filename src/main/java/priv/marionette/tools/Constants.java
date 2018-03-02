@@ -34,6 +34,11 @@ public class Constants {
     public static final int IO_BUFFER_SIZE = 4 * 1024;
 
     /**
+     * The block size used to compress data in the LZFOutputStream.
+     */
+    public static final int IO_BUFFER_SIZE_COMPRESS = 128 * 1024;
+
+    /**
      * Name of the character encoding format.
      */
     public static final Charset UTF8 = Charset.forName("UTF-8");
