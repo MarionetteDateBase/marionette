@@ -24,8 +24,7 @@ public interface BlockCipher {
     void setKey(byte[] key);
 
     /**
-     * Encrypt a number of bytes. This is done in-place, that
-     * means the bytes are overwritten.
+     * 加密字节流
      *
      * @param bytes the byte array
      * @param off the start index
@@ -34,8 +33,7 @@ public interface BlockCipher {
     void encrypt(byte[] bytes, int off, int len);
 
     /**
-     * Decrypt a number of bytes. This is done in-place, that
-     * means the bytes are overwritten.
+     * 解密字节流
      *
      * @param bytes the byte array
      * @param off the start index
@@ -44,7 +42,7 @@ public interface BlockCipher {
     void decrypt(byte[] bytes, int off, int len);
 
     /**
-     * Get the length of the key in bytes.
+     * 获取Random Key的长度
      *
      * @return the length of the key
      */
