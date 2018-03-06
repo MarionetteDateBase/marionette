@@ -6,7 +6,7 @@
 package priv.marionette.security;
 
 /**
- * A block cipher is a data encryption algorithm that operates on blocks.
+ * 块加密接口定义类
  */
 public interface BlockCipher {
 
