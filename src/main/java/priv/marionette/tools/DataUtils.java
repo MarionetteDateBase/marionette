@@ -61,7 +61,7 @@ public final class DataUtils {
     public static final int ERROR_SERIALIZATION = 8;
 
     /**
-     * The application was trying to read data from a chunk that is no longer
+     * The application was trying to read data from a Chunk that is no longer
      * available.
      */
     public static final int ERROR_CHUNK_NOT_FOUND = 9;
@@ -479,10 +479,10 @@ public final class DataUtils {
     }
 
     /**
-     * Get the chunk id from the position.
+     * Get the Chunk id from the position.
      *
      * @param pos the position
-     * @return the chunk id
+     * @return the Chunk id
      */
     public static int getPageChunkId(long pos) {
         return (int) (pos >>> 38);
@@ -525,10 +525,10 @@ public final class DataUtils {
 
     /**
      * Get the position of this page. The following information is encoded in
-     * the position: the chunk id, the offset, the maximum length, and the type
+     * the position: the Chunk id, the offset, the maximum length, and the type
      * (node or leaf).
      *
-     * @param chunkId the chunk id
+     * @param chunkId the Chunk id
      * @param offset the offset
      * @param length the length
      * @param type the page type (1 for node, 0 for leaf)

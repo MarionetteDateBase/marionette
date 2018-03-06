@@ -26,7 +26,7 @@ import java.util.Arrays;
 public class FilePathEncrypt extends  FilePathWrapper{
 
     /**
-     * Register this file system.
+     * 默认容器注册此文件系统
      */
     public static void register() {
         FilePath.register(new FilePathEncrypt());
@@ -77,7 +77,7 @@ public class FilePathEncrypt extends  FilePathWrapper{
     }
 
     /**
-     * Split the file name into algorithm, password, and base file name.
+     * 分解文件名
      *
      * @param fileName the file name
      * @return an array with algorithm, password, and base file name
@@ -100,8 +100,7 @@ public class FilePathEncrypt extends  FilePathWrapper{
     }
 
     /**
-     * Convert a char array to a byte array, in UTF-16 format. The char array is
-     * not cleared after use (this must be done by the caller).
+     * 根据UTF-16的字符集规则将passwordChars转化为对应的字节码
      *
      * @param passwordChars the password characters
      * @return the byte array

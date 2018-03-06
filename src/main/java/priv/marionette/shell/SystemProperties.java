@@ -1,6 +1,5 @@
 package priv.marionette.shell;
 
-import priv.marionette.tools.Constants;
 import priv.marionette.tools.MathUtils;
 import priv.marionette.tools.Utils;
 

@@ -93,7 +93,7 @@ public final class CompressLZF implements Compressor {
     private static final int HASH_SIZE = 1 << 14;
 
     /**
-     * The maximum number of literals in a chunk (32).
+     * The maximum number of literals in a Chunk (32).
      */
     private static final int MAX_LITERAL = 1 << 5;
 
@@ -226,8 +226,8 @@ public final class CompressLZF implements Compressor {
                 // copy one byte from input to output as part of literal
                 out[outPos++] = in[inPos++];
                 literals++;
-                // at the end of this literal chunk, write the length
-                // to the control byte and start a new chunk
+                // at the end of this literal Chunk, write the length
+                // to the control byte and start a new Chunk
                 if (literals == MAX_LITERAL) {
                     out[outPos - literals - 1] = (byte) (literals - 1);
                     literals = 0;
@@ -335,8 +335,8 @@ public final class CompressLZF implements Compressor {
                 // copy one byte from input to output as part of literal
                 out[outPos++] = in.get(inPos++);
                 literals++;
-                // at the end of this literal chunk, write the length
-                // to the control byte and start a new chunk
+                // at the end of this literal Chunk, write the length
+                // to the control byte and start a new Chunk
                 if (literals == MAX_LITERAL) {
                     out[outPos - literals - 1] = (byte) (literals - 1);
                     literals = 0;
