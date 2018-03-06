@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
  **/
 public class FilePathMem extends FilePath {
 
+    /**用红黑树保存内存chunk文件节点**/
     private static final TreeMap<String, FileMemData> MEMORY_FILES =
             new TreeMap<>();
     private static final FileMemData DIRECTORY = new FileMemData("", false);
@@ -199,7 +200,7 @@ public class FilePathMem extends FilePath {
     }
 
     /**
-     *获得绝对路径
+     * 获得绝对路径
      *
      * @param fileName the file name
      * @return the canonical path
@@ -219,7 +220,7 @@ public class FilePathMem extends FilePath {
     }
 
     /**
-     * Whether the file should be compressed.
+     * 是否被压缩
      *
      * @return if it should be compressed.
      */
@@ -230,7 +231,7 @@ public class FilePathMem extends FilePath {
 }
 
 /**
- * A memory file system that compresses blocks to conserve memory.
+ * 在内存中存储压缩区块
  */
 class FilePathMemLZF extends FilePathMem {
 
@@ -254,12 +255,12 @@ class FilePathMemLZF extends FilePathMem {
 }
 
 /**
- * This class represents an in-memory file.
+ * 内存文件操作类
  */
 class FileMem extends FileSystemBase {
 
     /**
-     * The file data.
+     * 数据文件
      */
     final FileMemData data;
 
@@ -406,8 +407,7 @@ class FileMem extends FileSystemBase {
 }
 
 /**
- * This class contains the data of an in-memory random access file.
- * Data compression using the LZF algorithm is supported as well.
+ * 将java堆栈模型数据转化为区块化文件存储于内存，可使用LZF压缩
  */
 class FileMemData {
 
@@ -448,7 +448,7 @@ class FileMemData {
     }
 
     /**
-     * Get the page if it exists.
+     * 从数状数组中获取指针指向的page节点
      *
      * @param page the page id
      * @return the byte array, or null
@@ -462,7 +462,7 @@ class FileMemData {
     }
 
     /**
-     * Set the page data.
+     * Insert or update page节点的数据
      *
      * @param page the page id
      * @param oldData the old data
@@ -487,7 +487,7 @@ class FileMemData {
     }
 
     /**
-     * Lock the file in exclusive mode if possible.
+     * 在exclusive mode下锁住文件
      *
      * @return if locking was successful
      */
@@ -500,7 +500,7 @@ class FileMemData {
     }
 
     /**
-     * Lock the file in shared mode if possible.
+     * 在shared mode下锁住文件
      *
      * @return if locking was successful
      */
@@ -513,7 +513,7 @@ class FileMemData {
     }
 
     /**
-     * Unlock the file.
+     * 文件解锁
      */
     synchronized void unlock() {
         if (isLockedExclusive) {
@@ -524,7 +524,7 @@ class FileMemData {
     }
 
     /**
-     * This small cache compresses the data if an element leaves the cache.
+     * 压缩时简单地使用LRU缓存策略
      */
     static class Cache<K, V> extends LinkedHashMap<K, V> {
 
@@ -553,7 +553,7 @@ class FileMemData {
     }
 
     /**
-     * Points to a block of bytes that needs to be compressed.
+     * 指向将被压缩的字节区块的指针
      */
     static class CompressItem {
 
@@ -608,7 +608,7 @@ class FileMemData {
     }
 
     /**
-     * Compress the data in a byte array.
+     * 压缩指定page的数据
      *
      * @param page which page to compress
      */
@@ -629,7 +629,7 @@ class FileMemData {
     }
 
     /**
-     * Update the last modified time.
+     * 更新unix时间戳
      *
      * @param openReadOnly if the file was opened in read-only mode
      */
@@ -641,7 +641,7 @@ class FileMemData {
     }
 
     /**
-     * Get the file length.
+     * 获取文件长度
      *
      * @return the length
      */
@@ -650,7 +650,7 @@ class FileMemData {
     }
 
     /**
-     * Truncate the file.
+     * 扩展文件长度
      *
      * @param newLength the new length
      */
@@ -685,7 +685,7 @@ class FileMemData {
     }
 
     /**
-     * Read or write.
+     * 读写操作
      *
      * @param pos the position
      * @param b the byte array
@@ -726,7 +726,7 @@ class FileMemData {
     }
 
     /**
-     * Set the file name.
+     * 设置文件名
      *
      * @param name the name
      */
@@ -735,7 +735,7 @@ class FileMemData {
     }
 
     /**
-     * Get the file name
+     * 获取文件名
      *
      * @return the name
      */
@@ -744,7 +744,7 @@ class FileMemData {
     }
 
     /**
-     * Get the last modified time.
+     * 获取最新更新时间
      *
      * @return the time
      */
@@ -753,7 +753,7 @@ class FileMemData {
     }
 
     /**
-     * Check whether writing is allowed.
+     * 是否有写权限
      *
      * @return true if it is
      */
@@ -762,7 +762,7 @@ class FileMemData {
     }
 
     /**
-     * Set the read-only flag.
+     * 设置为只读.
      *
      * @return true
      */
