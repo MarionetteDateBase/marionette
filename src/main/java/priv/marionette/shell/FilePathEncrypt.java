@@ -118,37 +118,39 @@ public class FilePathEncrypt extends  FilePathWrapper{
     }
 
     /**
-     * An encrypted file with a read cache.
+     * 加密文件read cache
      */
     public static class FileEncrypt extends FileSystemBase {
 
         /**
-         * The block size.
+         * 区块大小
          */
         static final int BLOCK_SIZE = 4096;
 
         /**
-         * The block size bit mask.
+         * 区块二进制掩码
          */
         static final int BLOCK_SIZE_MASK = BLOCK_SIZE - 1;
 
         /**
-         * The length of the file header. Using a smaller header is possible,
-         * but would mean reads and writes are not aligned to the block size.
+         * 文件header长度
          */
         static final int HEADER_LENGTH = BLOCK_SIZE;
 
-        private static final byte[] HEADER = "H2encrypt\n".getBytes();
+        private static final byte[] HEADER = "MarionetteEncrypt\n".getBytes();
+
+        /**
+         * 在头部后一位字节开始，加salt字节流
+         */
         private static final int SALT_POS = HEADER.length;
 
         /**
-         * The length of the salt, in bytes.
+         * salt字节流的长度
          */
         private static final int SALT_LENGTH = 8;
 
         /**
-         * The number of iterations. It is relatively low; a higher value would
-         * slow down opening files on Android too much.
+         * 用于PBKDF2算法密钥生成时的hash循环次数，不建议循环太多次，影响性能
          */
         private static final int HASH_ITERATIONS = 10;
 
@@ -166,6 +168,10 @@ public class FilePathEncrypt extends  FilePathWrapper{
 
         private final String name;
 
+
+        /**
+         * 作为对数据库应用的磁盘加密，故选用XST-AES这样一个高级块加密标准
+         */
         private XTS xts;
 
         private byte[] encryptionKey;
@@ -427,7 +433,7 @@ public class FilePathEncrypt extends  FilePathWrapper{
         }
 
         /**
-         * Encrypt the data.
+         * 数据加密
          *
          * @param id the (sector) id
          * @param len the number of bytes
@@ -455,7 +461,7 @@ public class FilePathEncrypt extends  FilePathWrapper{
         }
 
         /**
-         * Decrypt the data.
+         * 数据解密
          *
          * @param id the (sector) id
          * @param len the number of bytes
