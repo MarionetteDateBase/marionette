@@ -9,8 +9,7 @@ package priv.marionette.security;
 import priv.marionette.tools.Bits;
 
 /**
- * An implementation of the AES block cipher algorithm,
- * also known as Rijndael. Only AES-128 is supported by this class.
+ * XTS-AES(128 bit)
  */
 public class AES implements BlockCipher {
 
