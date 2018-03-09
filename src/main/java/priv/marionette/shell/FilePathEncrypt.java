@@ -150,20 +150,17 @@ public class FilePathEncrypt extends  FilePathWrapper{
         private static final int SALT_LENGTH = 8;
 
         /**
-         * 用于PBKDF2算法密钥生成时的hash循环次数，不建议循环太多次，影响性能
+         * 用于PBKDF2算法hash密钥生成时的循环次数，不建议循环太多次，影响性能
          */
         private static final int HASH_ITERATIONS = 10;
 
         private final FileChannel base;
 
         /**
-         * The current position within the file, from a user perspective.
+         * 文件当前指针的位置
          */
         private long pos;
 
-        /**
-         * The current file size, from a user perspective.
-         */
         private long size;
 
         private final String name;
@@ -409,20 +406,18 @@ public class FilePathEncrypt extends  FilePathWrapper{
     }
 
     /**
-     * An XTS implementation as described in
-     * IEEE P1619 (Standard Architecture for Encrypted Shared Storage Media).
-     * See also
-     * http://axelkenzo.ru/downloads/1619-2007-NIST-Submission.pdf
+     * XTS-AES,区块加密算法
      */
     static class XTS {
 
         /**
-         * Galois field feedback.
+         *伽罗瓦域GF(2^8)
+         *在Rijndael密码学中，这个多项式确定为x^8+x^4+x^3+x+1
          */
         private static final int GF_128_FEEDBACK = 0x87;
 
         /**
-         * The AES encryption block size.
+         * 加密后的区块大小，4*4
          */
         private static final int CIPHER_BLOCK_SIZE = 16;
 
