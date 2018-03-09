@@ -428,7 +428,7 @@ public class FilePathEncrypt extends  FilePathWrapper{
         }
 
         /**
-         * 数据加密
+         * 数据加密，参照高级加密标准文档 https://csrc.nist.gov/csrc/media/publications/fips/197/final/documents/fips-197.pdf
          *
          * @param id the (sector) id
          * @param len the number of bytes
