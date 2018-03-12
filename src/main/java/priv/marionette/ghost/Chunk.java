@@ -1,5 +1,11 @@
 package priv.marionette.ghost;
 
+import priv.marionette.tools.DataUtils;
+
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+
 /**
  * 一个Chunk对应一颗B-Tree，由至少一个page(树的节点)组成，
  * 每个page大小为一次IO的大小(默认4096Bytes，对应8个磁盘扇区)，
@@ -42,6 +48,11 @@ public class Chunk {
      * 起始数据块的位置
      */
     public long block;
+
+    /**
+     * 数据块长度的总和
+     */
+    public int len;
 
 
     /**
@@ -113,13 +124,64 @@ public class Chunk {
      * 下一个Chunk的offset
      *
      **/
-    public int next;
+    public long next;
 
-    Chunk(int id){
+    Chunk(int id) {
         this.id = id;
     }
 
 
+    /**
+     * 读取Chunk Header
+     *
+     **/
+    public static Chunk readChunkHeader(ByteBuffer buff, long start) {
+        int pos = buff.position();
+        byte[] data = new byte[Math.min(buff.remaining(), MAX_HEADER_LENGTH)];
+        buff.get(data);
+        try {
+            for (int i = 0; i < data.length; i++) {
+                if (data[i] == '\n') {
+                    // set the position to the start of the first page
+                    buff.position(pos + i + 1);
+                    String s = new String(data, 0, i, StandardCharsets.ISO_8859_1).trim();
+                    return fromString(s);
+                }
+            }
+        } catch (Exception e) {
+            // 意外异常
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_FILE_CORRUPT,
+                    "File corrupt reading chunk at position {0}", start, e);
+        }
+        throw DataUtils.newIllegalStateException(
+                DataUtils.ERROR_FILE_CORRUPT,
+                "File corrupt reading chunk at position {0}", start);
+    }
+
+
+    /**
+     * 从一个字符串构造Chunk
+     *
+     **/
+    public static Chunk fromString(String s) {
+        HashMap<String, String> map = DataUtils.parseMap(s);
+        int id = DataUtils.readHexInt(map, "chunk", 0);
+        Chunk c = new Chunk(id);
+        c.block = DataUtils.readHexLong(map, "block", 0);
+        c.len = DataUtils.readHexInt(map, "len", 0);
+        c.pageCount = DataUtils.readHexInt(map, "pages", 0);
+        c.pageCountLive = DataUtils.readHexInt(map, "livePages", c.pageCount);
+        c.mapId = DataUtils.readHexInt(map, "map", 0);
+        c.maxLen = DataUtils.readHexLong(map, "max", 0);
+        c.maxLenLive = DataUtils.readHexLong(map, "liveMax", c.maxLen);
+        c.metaRootPos = DataUtils.readHexLong(map, "root", 0);
+        c.time = DataUtils.readHexLong(map, "time", 0);
+        c.unused = DataUtils.readHexLong(map, "unused", 0);
+        c.version = DataUtils.readHexLong(map, "version", id);
+        c.next = DataUtils.readHexLong(map, "next", 0);
+        return c;
+    }
 
 
 
