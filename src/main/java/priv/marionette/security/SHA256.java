@@ -90,7 +90,8 @@ public class SHA256 {
     }
 
     /**
-     * Calculate the hash using the password-based key derivation function 2.
+     * PBKDF2,使用HmacSHA256生成一个random key，根据原文密码和一个盐值生成密文，因为重复hash次数较多，
+     * 破解成本较高，而且加了salt值，能有效防止彩虹表攻击
      *
      * @param password the password
      * @param salt the salt
