@@ -28,7 +28,6 @@ public class DbException  extends RuntimeException{
 
     private static final Properties MESSAGES = new Properties();
 
-    private Object source;
 
     static {
         try {
@@ -89,44 +88,6 @@ public class DbException  extends RuntimeException{
         return message;
     }
 
-    /**
-     * Get the SQLException object.
-     *
-     * @return the exception
-     */
-    public SQLException getSQLException() {
-        return (SQLException) getCause();
-    }
-
-    /**
-     * Get the error code.
-     *
-     * @return the error code
-     */
-    public int getErrorCode() {
-        return getSQLException().getErrorCode();
-    }
-
-    /**
-     * Set the SQL statement of the given exception.
-     * This method may create a new object.
-     *
-     * @param sql the SQL statement
-     * @return the exception
-     */
-    public DbException addSQL(String sql) {
-        SQLException e = getSQLException();
-        if (e instanceof JDBCException) {
-            JDBCException j = (JDBCException) e;
-            if (j.getSQL() == null) {
-                j.setSQL(sql);
-            }
-            return this;
-        }
-        e = new JDBCException(e.getMessage(), sql, e.getSQLState(),
-                e.getErrorCode(), e, null);
-        return new DbException(e);
-    }
 
     /**
      * Create a database exception for a specific error code.
@@ -173,106 +134,6 @@ public class DbException  extends RuntimeException{
         return new DbException(getJdbcSQLException(errorCode, null, params));
     }
 
-    /**
-     * Create a database exception for an arbitrary SQLState.
-     *
-     * @param sqlstate the state to use
-     * @param message the message to use
-     * @return the exception
-     */
-    public static DbException fromUser(String sqlstate, String message) {
-        // do not translate as sqlstate is arbitrary : avoid "message not found"
-        return new DbException(new JDBCException(message, null, sqlstate, 0, null, null));
-    }
-
-    /**
-     * Create a syntax error exception.
-     *
-     * @param sql the SQL statement
-     * @param index the position of the error in the SQL statement
-     * @return the exception
-     */
-    public static DbException getSyntaxError(String sql, int index) {
-        sql = StringUtils.addAsterisk(sql, index);
-        return get(ErrorCode.SYNTAX_ERROR_1, sql);
-    }
-
-    /**
-     * Create a syntax error exception.
-     *
-     * @param sql the SQL statement
-     * @param index the position of the error in the SQL statement
-     * @param message the message
-     * @return the exception
-     */
-    public static DbException getSyntaxError(String sql, int index,
-                                             String message) {
-        sql = StringUtils.addAsterisk(sql, index);
-        return new DbException(getJdbcSQLException(ErrorCode.SYNTAX_ERROR_2,
-                null, sql, message));
-    }
-
-    /**
-     * Gets a SQL exception meaning this feature is not supported.
-     *
-     * @param message what exactly is not supported
-     * @return the exception
-     */
-    public static DbException getUnsupportedException(String message) {
-        return get(ErrorCode.FEATURE_NOT_SUPPORTED_1, message);
-    }
-
-    /**
-     * Gets a SQL exception meaning this value is invalid.
-     *
-     * @param param the name of the parameter
-     * @param value the value passed
-     * @return the IllegalArgumentException object
-     */
-    public static DbException getInvalidValueException(String param,
-                                                       Object value) {
-        return get(ErrorCode.INVALID_VALUE_2,
-                value == null ? "null" : value.toString(), param);
-    }
-
-    /**
-     * Throw an internal error. This method seems to return an exception object,
-     * so that it can be used instead of 'return', but in fact it always throws
-     * the exception.
-     *
-     * @param s the message
-     * @return the RuntimeException object
-     * @throws RuntimeException the exception
-     */
-    public static RuntimeException throwInternalError(String s) {
-        RuntimeException e = new RuntimeException(s);
-        DbException.traceThrowable(e);
-        throw e;
-    }
-
-    /**
-     * Throw an internal error. This method seems to return an exception object,
-     * so that it can be used instead of 'return', but in fact it always throws
-     * the exception.
-     *
-     * @return the RuntimeException object
-     */
-    public static RuntimeException throwInternalError() {
-        return throwInternalError("Unexpected code path");
-    }
-
-    /**
-     * Convert an exception to a SQL exception using the default mapping.
-     *
-     * @param e the root cause
-     * @return the SQL exception object
-     */
-    public static SQLException toSQLException(Exception e) {
-        if (e instanceof SQLException) {
-            return (SQLException) e;
-        }
-        return convert(e).getSQLException();
-    }
 
     /**
      * Convert a throwable to an SQL exception using the default mapping. All
@@ -370,13 +231,6 @@ public class DbException  extends RuntimeException{
         return new IOException(e.toString(), e);
     }
 
-    public Object getSource() {
-        return source;
-    }
-
-    public void setSource(Object source) {
-        this.source = source;
-    }
 
     /**
      * Write the exception to the driver manager log writer if configured.

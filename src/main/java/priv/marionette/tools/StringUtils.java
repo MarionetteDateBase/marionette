@@ -408,51 +408,7 @@ public class StringUtils {
         return s;
     }
 
-    /**
-     * Encode the string as an URL.
-     *
-     * @param s the string to encode
-     * @return the encoded string
-     */
-    public static String urlEncode(String s) {
-        try {
-            return URLEncoder.encode(s, "UTF-8");
-        } catch (Exception e) {
-            // UnsupportedEncodingException
-            throw DbException.convert(e);
-        }
-    }
 
-    /**
-     * Decode the URL to a string.
-     *
-     * @param encoded the encoded URL
-     * @return the decoded string
-     */
-    public static String urlDecode(String encoded) {
-        int length = encoded.length();
-        byte[] buff = new byte[length];
-        int j = 0;
-        for (int i = 0; i < length; i++) {
-            char ch = encoded.charAt(i);
-            if (ch == '+') {
-                buff[j++] = ' ';
-            } else if (ch == '%') {
-                buff[j++] = (byte) Integer.parseInt(encoded.substring(i + 1, i + 3), 16);
-                i += 2;
-            } else {
-                if (SystemProperties.CHECK) {
-                    if (ch > 127 || ch < ' ') {
-                        throw new IllegalArgumentException(
-                                "Unexpected char " + (int) ch + " decoding " + encoded);
-                    }
-                }
-                buff[j++] = (byte) ch;
-            }
-        }
-        String s = new String(buff, 0, j, Constants.UTF8);
-        return s;
-    }
 
     /**
      * Split a string into an array of strings using the given separator. A null

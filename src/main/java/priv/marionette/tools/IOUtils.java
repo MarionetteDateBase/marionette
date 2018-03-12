@@ -409,21 +409,6 @@ public class IOUtils {
                 new OutputStreamWriter(out, Constants.UTF8));
     }
 
-    /**
-     * Wrap an input stream in a reader. The bytes are converted to characters
-     * using the US-ASCII character set.
-     *
-     * @param in the input stream
-     * @return the reader
-     */
-    public static Reader getAsciiReader(InputStream in) {
-        try {
-            return in == null ? null : new InputStreamReader(in, "US-ASCII");
-        } catch (Exception e) {
-            // UnsupportedEncodingException
-            throw DbException.convert(e);
-        }
-    }
 
     /**
      * Trace input or output operations if enabled.
