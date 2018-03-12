@@ -958,7 +958,7 @@ public final class DataUtils {
     }
 
     /**
-     * Read a hex long value from a map.
+     * 读取一个16进制的Long Value
      *
      * @param map the map
      * @param key the key
@@ -983,7 +983,7 @@ public final class DataUtils {
     }
 
     /**
-     * Parse an unsigned, hex long.
+     * 解析16进制Long Value
      *
      * @param x the string
      * @return the parsed value
