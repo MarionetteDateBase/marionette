@@ -91,10 +91,33 @@ public class Chunk {
     public long version;
 
     /**
-     * Chunk数据从内存到磁盘持久化的间隔时间
+     * Chunk的创建时间(unix时间戳)
      *
      **/
     public long time;
+
+    /**
+     * Chunk在当前版本被停用的时间(unix时间戳)
+     *
+     **/
+    public long unused;
+
+    /**
+     * 最后使用的mapId
+     *
+     **/
+    public int mapId;
+
+
+    /**
+     * 下一个Chunk的offset
+     *
+     **/
+    public int next;
+
+    Chunk(int id){
+        this.id = id;
+    }
 
 
 
