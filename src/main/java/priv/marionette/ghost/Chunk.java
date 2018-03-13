@@ -184,6 +184,9 @@ public class Chunk {
     }
 
 
+    public void wirteChunkHeader(){
+
+    }
 
 
 
