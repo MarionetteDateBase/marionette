@@ -13,28 +13,28 @@ import java.util.HashMap;
  *
  * @author Yue Yu
  * @create 2018-01-04 下午6:48
- **/
+ */
 public class Chunk {
 
 
     /**
      * 最大ID
      *
-     **/
+     */
     public static  final  int MAX_ID = (1 << 26) -1;
 
 
     /**
      * header长度
      *
-     **/
+     */
     public static  final  int MAX_HEADER_LENGTH = 1024;
 
 
     /**
      * Chunk footer的长度
      *
-     **/
+     */
     public static  final  int FOOTER_LENGTH = 128;
 
     /**
@@ -77,53 +77,53 @@ public class Chunk {
     /**
      * 被引用状态下的Page的最大长度和
      *
-     **/
+     */
     public long  maxLenLive;
 
 
     /**
      * 垃圾回收优先级，0为最高
      *
-     **/
+     */
     public int collectPriority;
 
 
     /**
      * meta信息的起始offset
      *
-     **/
+     */
     public long metaRootPos;
 
 
     /**
      * version信息的起始offset
      *
-     **/
+     */
     public long version;
 
     /**
      * Chunk的创建时间(unix时间戳)
      *
-     **/
+     */
     public long time;
 
     /**
      * Chunk在当前版本被停用的时间(unix时间戳)
      *
-     **/
+     */
     public long unused;
 
     /**
      * 最后使用的mapId
      *
-     **/
+     */
     public int mapId;
 
 
     /**
      * 下一个Chunk的offset
      *
-     **/
+     */
     public long next;
 
     Chunk(int id) {
@@ -134,7 +134,7 @@ public class Chunk {
     /**
      * 读取Chunk Header
      *
-     **/
+     */
     public static Chunk readChunkHeader(ByteBuffer buff, long start) {
         int pos = buff.position();
         byte[] data = new byte[Math.min(buff.remaining(), MAX_HEADER_LENGTH)];
@@ -163,7 +163,7 @@ public class Chunk {
     /**
      * 从一个字符串构造Chunk
      *
-     **/
+     */
     public static Chunk fromString(String s) {
         HashMap<String, String> map = DataUtils.parseMap(s);
         int id = DataUtils.readHexInt(map, "chunk", 0);
@@ -184,12 +184,102 @@ public class Chunk {
     }
 
 
-    public void wirteChunkHeader(){
+    public void wirteChunkHeader(WriteBuffer buffer,int minLength){
+        long pos = buffer.position();
+        buffer.put(asString().getBytes(StandardCharsets.ISO_8859_1));
+        // 如果header长度不够则填充空白字符
+        while (buffer.position() - pos < minLength - 1) {
+            buffer.put((byte) ' ');
+        }
+        // 如果header长度超过限制则抛出异常
+        if (minLength != 0 && buffer.position() > minLength) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_INTERNAL,
+                    "Chunk header is too long");
+        }
+        buffer.put((byte) '\n');
 
     }
 
 
+    /**
+     * 将Chunk对象序列化为16进制字符串
+     *
+     */
+    public String asString() {
+        StringBuilder buff = new StringBuilder();
+        DataUtils.appendMap(buff, "chunk", id);
+        DataUtils.appendMap(buff, "block", block);
+        DataUtils.appendMap(buff, "len", len);
+        if (maxLen != maxLenLive) {
+            DataUtils.appendMap(buff, "liveMax", maxLenLive);
+        }
+        if (pageCount != pageCountLive) {
+            DataUtils.appendMap(buff, "livePages", pageCountLive);
+        }
+        DataUtils.appendMap(buff, "map", mapId);
+        DataUtils.appendMap(buff, "max", maxLen);
+        if (next != 0) {
+            DataUtils.appendMap(buff, "next", next);
+        }
+        DataUtils.appendMap(buff, "pages", pageCount);
+        DataUtils.appendMap(buff, "root", metaRootPos);
+        DataUtils.appendMap(buff, "time", time);
+        if (unused != 0) {
+            DataUtils.appendMap(buff, "unused", unused);
+        }
+        DataUtils.appendMap(buff, "version", version);
+        return buff.toString();
+    }
 
+
+    byte[] getFooterBytes() {
+        StringBuilder buff = new StringBuilder();
+        DataUtils.appendMap(buff, "chunk", id);
+        DataUtils.appendMap(buff, "block", block);
+        DataUtils.appendMap(buff, "version", version);
+        byte[] bytes = buff.toString().getBytes(StandardCharsets.ISO_8859_1);
+        int checksum = DataUtils.getFletcher32(bytes, 0, bytes.length);
+        DataUtils.appendMap(buff, "fletcher", checksum);
+        while (buff.length() < Chunk.FOOTER_LENGTH - 1) {
+            buff.append(' ');
+        }
+        buff.append("\n");
+        return buff.toString().getBytes(StandardCharsets.ISO_8859_1);
+    }
+
+    /**
+     * 计算Chunk中page的存活率
+     *
+     */
+    public int getFillRate() {
+        if (maxLenLive <= 0) {
+            return 0;
+        } else if (maxLenLive == maxLen) {
+            return 100;
+        }
+        return 1 + (int) (98 * maxLenLive / maxLen);
+    }
+
+    static String getMetaKey(int chunkId) {
+        return "chunk." + Integer.toHexString(chunkId);
+    }
+
+
+    @Override
+    public String toString() {
+        return asString();
+    }
+
+    @Override
+    public int hashCode() {
+        return id;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof Chunk && ((Chunk) o).id == id;
+    }
 
 
 
