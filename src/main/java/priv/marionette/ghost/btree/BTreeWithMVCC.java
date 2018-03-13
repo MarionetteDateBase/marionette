@@ -7,6 +7,5 @@ package priv.marionette.ghost.btree;
  * @create 2018-03-13 下午4:06
  **/
 public final class BTreeWithMVCC {
-
-
+    
 }
