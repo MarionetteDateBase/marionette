@@ -7,4 +7,5 @@ package priv.marionette.ghost.type;
  * @create 2018-03-13 下午4:49
  **/
 public class StringDataType {
+
 }
