@@ -1,5 +1,6 @@
 package priv.marionette.ghost.type;
 
+import com.sun.istack.internal.NotNull;
 import priv.marionette.ghost.WriteBuffer;
 import priv.marionette.tools.DataUtils;
 
@@ -95,6 +96,33 @@ public class ObjectDataType implements  DataType{
     @Override
     public int compare(Object a, Object b) {
         return last.compare(a, b);
+    }
+
+    /**
+     * Compare the contents of two byte arrays. If the content or length of the
+     * first array is smaller than the second array, -1 is returned. If the
+     * content or length of the second array is smaller than the first array, 1
+     * is returned. If the contents and lengths are the same, 0 is returned.
+     * <p>
+     * This method interprets bytes as unsigned.
+     *
+     * @param data1 the first byte array (must not be null)
+     * @param data2 the second byte array (must not be null)
+     * @return the result of the comparison (-1, 1 or 0)
+     */
+    public static int compareNotNull(byte[] data1, byte[] data2) {
+        if (data1 == data2) {
+            return 0;
+        }
+        int len = Math.min(data1.length, data2.length);
+        for (int i = 0; i < len; i++) {
+            int b = data1[i] & 255;
+            int b2 = data2[i] & 255;
+            if (b != b2) {
+                return b > b2 ? 1 : -1;
+            }
+        }
+        return Integer.signum(data1.length - data2.length);
     }
 
     @Override
@@ -431,7 +459,7 @@ public class ObjectDataType implements  DataType{
         }
 
         /**
-         * Get the type for the given object.
+         * 获取对象相应的序列化类型
          *
          * @param o the object
          * @return the type
@@ -441,7 +469,7 @@ public class ObjectDataType implements  DataType{
         }
 
         /**
-         * Read an object from the buffer.
+         * 根据tag从buffer中读取相应的类型
          *
          * @param buff the buffer
          * @param tag the first byte of the object (usually the type)
@@ -1242,8 +1270,6 @@ public class ObjectDataType implements  DataType{
                     }
                 }
             }
-            // we say they are larger, because these objects
-            // use quite a lot of disk space
             return size * 2;
         }
 
@@ -1504,11 +1530,14 @@ public class ObjectDataType implements  DataType{
                 return;
             }
             byte[] data = serialize(obj);
-            // we say they are larger, because these objects
-            // use quite a lot of disk space
             int size = data.length * 2;
-            // adjust the average size
-            // using an exponential moving average
+            // 指数平均数指标(Exponential Moving Average),是一种趋向类指标,
+            // 比较著名的应用比如。。K线图。。很多时候我用来预测我的股票收益zzz
+            // 这里我用来预测java序列化后码流所造成的空间损耗，因为java序列化
+            // 确实比较耗空间，它会根据class的声明进行双亲迭代，但是对象序列化
+            // 如果要自己去定义比较复杂，还要写对象模型接口定义文件，所以考虑以
+            // 后优化成自定义对象序列化或者使用一些比较好的第三方开源框架(Avro,Thrift)
+            // p.s. json？谁说json的？你过来，我保证不打死你。。。
             averageSize = (size + 15 * averageSize) / 16;
             buff.put((byte) TYPE_SERIALIZED_OBJECT).putVarInt(data.length)
                     .put(data);
@@ -1519,8 +1548,6 @@ public class ObjectDataType implements  DataType{
             int len = DataUtils.readVarInt(buff);
             byte[] data = DataUtils.newBytes(len);
             int size = data.length * 2;
-            // adjust the average size
-            // using an exponential moving average
             averageSize = (size + 15 * averageSize) / 16;
             buff.get(data);
             return deserialize(data);
