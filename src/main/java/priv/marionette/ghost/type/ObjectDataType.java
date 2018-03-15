@@ -1,6 +1,5 @@
 package priv.marionette.ghost.type;
 
-import com.sun.istack.internal.NotNull;
 import priv.marionette.ghost.WriteBuffer;
 import priv.marionette.tools.DataUtils;
 
