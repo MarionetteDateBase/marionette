@@ -21,4 +21,10 @@ package priv.marionette.ghost;
  **/
 public class Page {
 
+    /**
+     * 空节点拥有同一指针
+     */
+    public static final Object[] EMPTY_OBJECT_ARRAY = new Object[0];
+
+
 }
