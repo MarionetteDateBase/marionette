@@ -17,7 +17,7 @@ public final class BTreeWithMVCC {
     /**
      * 区块大小，一个Chunk的有两个header，第二个是第一个header的备份
      */
-    static final int BLOCK_SIZE = 4 * 1024;
+    public static final int BLOCK_SIZE = 4 * 1024;
 
     private static final int FORMAT_WRITE = 1;
 
@@ -47,7 +47,6 @@ public final class BTreeWithMVCC {
      * 页面置换缓存
      */
     private final LIRSCache<Page> cache;
-
 
 
 

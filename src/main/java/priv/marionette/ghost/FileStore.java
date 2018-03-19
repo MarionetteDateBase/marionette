@@ -1,5 +1,7 @@
 package priv.marionette.ghost;
 
+import priv.marionette.ghost.btree.BTreeWithMVCC;
+
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -29,5 +31,10 @@ public class FileStore {
      * write的字节流的长度
      */
     protected final AtomicLong writeBytes = new AtomicLong(0);
+
+    protected final FreeSpaceBitSet freeSpace =
+            new FreeSpaceBitSet(2, BTreeWithMVCC.BLOCK_SIZE);
+
+
 
 }
