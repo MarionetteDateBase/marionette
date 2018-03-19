@@ -1,5 +1,9 @@
 package priv.marionette.ghost.btree;
 
+import priv.marionette.cache.LIRSCache;
+import priv.marionette.ghost.FileStore;
+import priv.marionette.ghost.Page;
+
 /**
  * 以B树为单位，以MVCC作为并发控制的<K,V>式数据存储
  *
@@ -29,7 +33,28 @@ public final class BTreeWithMVCC {
      */
     volatile BackgroundWriterThread backgroundWriterThread;
 
+    private volatile boolean reuseSpace = true;
+
+    private volatile boolean closed;
+
+    private final FileStore fileStore;
+
+    private final boolean fileStoreIsProvided;
+
+    private final int pageSplitSize;
+
+    /**
+     * 页面置换缓存
+     */
+    private final LIRSCache<Page> cache;
+
+
+
+
+
     private static class BackgroundWriterThread extends Thread {
+
+
 
     }
 
