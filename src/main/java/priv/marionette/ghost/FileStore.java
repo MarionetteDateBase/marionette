@@ -169,8 +169,39 @@ public class FileStore {
     }
 
 
+    /**
+     * 关闭文件IO流，释放文件锁
+     */
+    public void close() {
+        try {
+            if (fileLock != null) {
+                fileLock.release();
+                fileLock = null;
+            }
+            file.close();
+            freeSpace.clear();
+        } catch (Exception e) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_WRITING_FAILED,
+                    "Closing failed for file {0}", fileName, e);
+        } finally {
+            file = null;
+        }
+    }
 
 
+    /**
+     * 数据强制同步至硬盘
+     */
+    public void sync() {
+        try {
+            file.force(true);
+        } catch (IOException e) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_WRITING_FAILED,
+                    "Could not sync file {0}", fileName, e);
+        }
+    }
 
 
 }
