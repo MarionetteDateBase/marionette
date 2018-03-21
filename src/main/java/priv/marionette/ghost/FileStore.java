@@ -203,5 +203,149 @@ public class FileStore {
         }
     }
 
+    /**
+     * 获取文件大小
+     * @return
+     */
+    public long size() {
+        return fileSize;
+    }
+
+
+    /**
+     * 缩减文件长度
+     * @param size
+     */
+    public void truncate(long size) {
+        try {
+            writeCount.incrementAndGet();
+            file.truncate(size);
+            fileSize = Math.min(fileSize, size);
+        } catch (IOException e) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_WRITING_FAILED,
+                    "Could not truncate file {0} to size {1}",
+                    fileName, size, e);
+        }
+    }
+
+
+    /**
+     * 获取当前使用的文件
+     * @return
+     */
+    public FileChannel getFile() {
+        return file;
+    }
+
+
+    /**
+     * 获取当前使用的加密文件
+     * @return
+     */
+    public FileChannel getEncryptedFile() {
+        return encryptedFile;
+    }
+
+
+    /**
+     * 获取此store实例化以来文件总write次数
+     * @return
+     */
+    public long getWriteCount() {
+        return writeCount.get();
+    }
+
+
+    /**
+     * 获取此store实例化以来文件总write的字节流长度
+     * @return
+     */
+    public long getWriteBytes() {
+        return writeBytes.get();
+    }
+
+
+    /**
+     * 获取此store实例化以来文件总read次数
+     * @return
+     */
+    public long getReadCount() {
+        return readCount.get();
+    }
+
+
+    /**
+     * 获取此store实例化以来文件总read的字节流长度
+     * @return
+     */
+    public long getReadBytes() {
+        return readBytes.get();
+    }
+
+    public boolean isReadOnly() {
+        return readOnly;
+    }
+
+
+    /**
+     * 无用区块滞留时间
+     * @return
+     */
+    public int getDefaultRetentionTime() {
+        return 45000;
+    }
+
+    public void markUsed(long pos, int length) {
+        freeSpace.markUsed(pos, length);
+    }
+
+    /**
+     * 分配一块free space
+     *
+     * @param length
+     * @return
+     */
+    public long allocate(int length) {
+        return freeSpace.allocate(length);
+    }
+
+    /**
+     * 将指定空间强制释放
+     *
+     * @param pos the position in bytes
+     * @param length the number of bytes
+     */
+    public void free(long pos, int length) {
+        freeSpace.free(pos, length);
+    }
+
+    public int getFillRate() {
+        return freeSpace.getFillRate();
+    }
+
+    long getFirstFree() {
+        return freeSpace.getFirstFree();
+    }
+
+    long getFileLengthInUse() {
+        return freeSpace.getLastFree();
+    }
+
+    /**
+     * 标记此文件为空
+     */
+    public void clear() {
+        freeSpace.clear();
+    }
+
+    /**
+     * 获取文件名
+     *
+     * @return the file name
+     */
+    public String getFileName() {
+        return fileName;
+    }
 
 }
