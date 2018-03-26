@@ -130,8 +130,15 @@ public final class BTreeWithMVCC {
     }
 
 
-    private static class BackgroundWriterThread extends Thread {
+    public void registerUnsavedPage(int memory) {
+        unsavedMemory += memory;
+        int newValue = unsavedMemory;
+        if (newValue > autoCommitMemory && autoCommitMemory > 0) {
+            saveNeeded = true;
+        }
+    }
 
+    private static class BackgroundWriterThread extends Thread {
 
 
     }

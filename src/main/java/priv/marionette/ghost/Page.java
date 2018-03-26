@@ -88,6 +88,10 @@ public class Page {
         return p;
     }
 
+    private void addMemory(int mem) {
+        memory += mem;
+    }
+
     public static class PageReference {
 
         /**
