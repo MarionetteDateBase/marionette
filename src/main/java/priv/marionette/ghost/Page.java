@@ -26,7 +26,19 @@ public class Page {
      */
     public static final Object[] EMPTY_OBJECT_ARRAY = new Object[0];
 
+    private static final int IN_MEMORY = 0x80000000;
 
+    private final MVMap<?, ?> map;
+
+    private long version;
+
+    private long pos;
+
+
+    Page(MVMap<?, ?> map, long version) {
+        this.map = map;
+        this.version = version;
+    }
 
     /**
      * 记录多少被当前page引用/间接引用的其他pages的信息，通过引用计数法判断chunks的使用率，
