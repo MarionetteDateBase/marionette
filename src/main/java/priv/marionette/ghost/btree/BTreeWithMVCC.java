@@ -5,6 +5,7 @@ import priv.marionette.compress.Compressor;
 import priv.marionette.ghost.*;
 
 import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -121,6 +122,10 @@ public final class BTreeWithMVCC {
     private long lastFreeUnusedChunks;
 
 
+    BTreeWithMVCC(Map<String, Object> config){
+
+    }
+
     public long getCurrentVersion() {
         return currentVersion;
     }
@@ -137,6 +142,8 @@ public final class BTreeWithMVCC {
             saveNeeded = true;
         }
     }
+
+
 
     private static class BackgroundWriterThread extends Thread {
 
