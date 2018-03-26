@@ -1,6 +1,7 @@
 package priv.marionette.ghost;
 
 import priv.marionette.ghost.btree.BTreeWithMVCC;
+import priv.marionette.ghost.type.DataType;
 import priv.marionette.tools.DataUtils;
 
 /**
@@ -81,8 +82,8 @@ public class Page {
         } else {
             p.addMemory(memory);
         }
-        if(store.getFileStore() != null) {
-            store.registerUnsavedPage(p.memory);
+        if(bTree.getFileStore() != null) {
+            bTree.registerUnsavedPage(p.memory);
         }
         return p;
     }
@@ -110,6 +111,23 @@ public class Page {
             this.count = count;
         }
 
+    }
+
+    private void recalculateMemory() {
+        int mem = DataUtils.PAGE_MEMORY;
+        DataType keyType = map.getKeyType();
+        for (int i = 0; i < keys.length; i++) {
+            mem += keyType.getMemory(keys[i]);
+        }
+        if (this.isLeaf()) {
+            DataType valueType = map.getValueType();
+            for (int i = 0; i < keys.length; i++) {
+                mem += valueType.getMemory(values[i]);
+            }
+        } else {
+            mem += this.getRawChildPageCount() * DataUtils.PAGE_MEMORY_CHILD;
+        }
+        addMemory(mem - memory);
     }
 
     /**

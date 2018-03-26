@@ -125,6 +125,9 @@ public final class BTreeWithMVCC {
         return currentVersion;
     }
 
+    public FileStore getFileStore() {
+        return fileStore;
+    }
 
 
     private static class BackgroundWriterThread extends Thread {
