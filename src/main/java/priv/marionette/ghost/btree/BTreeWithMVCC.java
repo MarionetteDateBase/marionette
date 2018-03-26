@@ -1,8 +1,11 @@
 package priv.marionette.ghost.btree;
 
 import priv.marionette.cache.LIRSCache;
-import priv.marionette.ghost.FileStore;
-import priv.marionette.ghost.Page;
+import priv.marionette.compress.Compressor;
+import priv.marionette.ghost.*;
+
+import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 以B树为单位，以MVCC作为并发控制的<K,V>式数据存储
@@ -48,6 +51,79 @@ public final class BTreeWithMVCC {
      */
     private final LIRSCache<Page> cache;
 
+
+    private final LIRSCache<Page.PageChildren> cacheChunkRef;
+
+    private Chunk lastChunk;
+
+    private final ConcurrentHashMap<Integer, Chunk> chunks =
+            new ConcurrentHashMap<>();
+
+    private final ConcurrentHashMap<Long,
+            ConcurrentHashMap<Integer, Chunk>> freedPageSpace =
+            new ConcurrentHashMap<>();
+
+    private final MVMap<String, String> meta;
+
+    private final ConcurrentHashMap<Integer, MVMap<?, ?>> maps =
+            new ConcurrentHashMap<>();
+
+    private final HashMap<String, Object> storeHeader = new HashMap<>();
+
+    private WriteBuffer writeBuffer;
+
+    private int lastMapId;
+
+    private int versionsToKeep = 5;
+
+    private final int compressionLevel;
+
+    private Compressor compressorFast;
+
+    private Compressor compressorHigh;
+
+    private final Thread.UncaughtExceptionHandler backgroundExceptionHandler;
+
+    private volatile long currentVersion;
+
+    private long lastStoredVersion;
+
+    private int unsavedMemory;
+    private final int autoCommitMemory;
+    private boolean saveNeeded;
+
+    private long creationTime;
+
+    private int retentionTime;
+
+    private long lastCommitTime;
+
+    private Chunk retainChunk;
+
+    private volatile long currentStoreVersion = -1;
+
+    private Thread currentStoreThread;
+
+    private volatile boolean metaChanged;
+
+    private int autoCommitDelay;
+
+    private final int autoCompactFillRate;
+
+    private long autoCompactLastFileOpCount;
+
+    private final Object compactSync = new Object();
+
+    private IllegalStateException panicException;
+
+    private long lastTimeAbsolute;
+
+    private long lastFreeUnusedChunks;
+
+
+    public long getCurrentVersion() {
+        return currentVersion;
+    }
 
 
 

@@ -1,5 +1,8 @@
 package priv.marionette.ghost;
 
+import priv.marionette.ghost.btree.BTreeWithMVCC;
+import priv.marionette.tools.DataUtils;
+
 /**
  * B树的节点
  * 文件数据结构按照算法导论(第三版)给出如下定义:
@@ -34,10 +37,79 @@ public class Page {
 
     private long pos;
 
+    private long totalCount;
+
+    private int cachedCompare;
+
+    private int memory;
+
+    private Object[] keys;
+
+    private Object[] values;
+
+    private PageReference[] children;
+
+    private volatile boolean removedInMemory;
+
 
     Page(MVMap<?, ?> map, long version) {
         this.map = map;
         this.version = version;
+    }
+
+    static Page createEmpty(MVMap<?, ?> map, long version) {
+        return create(map, version,
+                EMPTY_OBJECT_ARRAY, EMPTY_OBJECT_ARRAY,
+                null,
+                0, DataUtils.PAGE_MEMORY);
+    }
+
+    public static Page create(MVMap<?, ?> map, long version,
+                              Object[] keys, Object[] values, PageReference[] children,
+                              long totalCount, int memory) {
+        Page p = new Page(map, version);
+        // the position is 0
+        p.keys = keys;
+        p.values = values;
+        p.children = children;
+        p.totalCount = totalCount;
+        BTreeWithMVCC bTree = map.bTree;
+        if(bTree.getFileStore() == null) {
+            p.memory = IN_MEMORY;
+        } else if (memory == 0) {
+            p.recalculateMemory();
+        } else {
+            p.addMemory(memory);
+        }
+        if(store.getFileStore() != null) {
+            store.registerUnsavedPage(p.memory);
+        }
+        return p;
+    }
+
+    public static class PageReference {
+
+        /**
+         * The position, if known, or 0.
+         */
+        final long pos;
+
+        /**
+         * The page, if in memory, or null.
+         */
+        final Page page;
+
+        /**
+         * The descendant count for this child page.
+         */
+        final long count;
+
+        public PageReference(Page page, long pos, long count) {
+            this.page = page;
+            this.pos = pos;
+            this.count = count;
+        }
+
     }
 
     /**
