@@ -489,6 +489,30 @@ public final class BTreeWithMVCC {
         }
     }
 
+    private Set<Integer> collectReferencedChunks() {
+        long testVersion = lastChunk.version;
+        DataUtils.checkArgument(testVersion > 0, "Collect references on version 0");
+        long readCount = getFileStore().readCount.get();
+        Set<Integer> referenced = new HashSet<>();
+        for (Cursor<String, String> c = meta.cursor("root."); c.hasNext();) {
+            String key = c.next();
+            if (!key.startsWith("root.")) {
+                break;
+            }
+            long pos = DataUtils.parseHexLong(c.getValue());
+            if (pos == 0) {
+                continue;
+            }
+            int mapId = DataUtils.parseHexInt(key.substring("root.".length()));
+            collectReferencedChunks(referenced, mapId, pos, 0);
+        }
+        long pos = lastChunk.metaRootPos;
+        collectReferencedChunks(referenced, 0, pos, 0);
+        readCount = fileStore.readCount.get() - readCount;
+        return referenced;
+    }
+
+
 
 
 
