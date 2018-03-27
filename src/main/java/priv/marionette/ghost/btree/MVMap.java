@@ -1,6 +1,5 @@
-package priv.marionette.ghost;
+package priv.marionette.ghost.btree;
 
-import priv.marionette.ghost.btree.BTreeWithMVCC;
 import priv.marionette.ghost.type.DataType;
 import priv.marionette.tools.ConcurrentArrayList;
 import priv.marionette.tools.DataUtils;
@@ -84,6 +83,14 @@ public class MVMap<K,V> extends AbstractMap<K, V>
 
     }
 
+
+    public long getVersion() {
+        return root.getVersion();
+    }
+
+    public boolean isClosed() {
+        return closed;
+    }
 
 
 

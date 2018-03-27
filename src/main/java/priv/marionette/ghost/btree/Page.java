@@ -1,6 +1,5 @@
-package priv.marionette.ghost;
+package priv.marionette.ghost.btree;
 
-import priv.marionette.ghost.btree.BTreeWithMVCC;
 import priv.marionette.ghost.type.DataType;
 import priv.marionette.tools.DataUtils;
 
