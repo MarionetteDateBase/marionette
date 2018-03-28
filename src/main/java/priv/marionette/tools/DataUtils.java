@@ -1082,4 +1082,25 @@ public final class DataUtils {
 
     }
 
+    /**
+     * 获取指定配置
+     * @param config
+     * @param key
+     * @param defaultValue
+     * @return
+     */
+    public static int getConfigParam(Map<String, ?> config, String key, int defaultValue) {
+        Object o = config.get(key);
+        if (o instanceof Number) {
+            return ((Number) o).intValue();
+        } else if (o != null) {
+            try {
+                return Integer.decode(o.toString());
+            } catch (NumberFormatException e) {
+                // ignore
+            }
+        }
+        return defaultValue;
+    }
+
 }

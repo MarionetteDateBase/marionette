@@ -92,6 +92,14 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return closed;
     }
 
+    public DataType getKeyType() {
+        return keyType;
+    }
+
+    public DataType getValueType(){
+        return valueType;
+    }
+
 
 
 
