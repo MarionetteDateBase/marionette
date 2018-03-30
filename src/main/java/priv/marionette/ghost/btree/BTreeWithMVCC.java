@@ -413,6 +413,11 @@ public final class BTreeWithMVCC {
         }
     }
 
+    public int getPageSplitSize() {
+        return pageSplitSize;
+    }
+
+
 
     private synchronized long commitAndSave() {
         if (closed) {
@@ -835,10 +840,16 @@ public final class BTreeWithMVCC {
 
 
 
-
-    private static class BackgroundWriterThread extends Thread {
-        public final Object sync = new Object();
-
+    long getOldestVersionToKeep() {
+        long v = currentVersion;
+        if (fileStore == null) {
+            return v - versionsToKeep;
+        }
+        long storeVersion = currentStoreVersion;
+        if (storeVersion > -1) {
+            v = Math.min(v, storeVersion);
+        }
+        return v;
     }
 
     Compressor getCompressorFast() {
@@ -856,7 +867,10 @@ public final class BTreeWithMVCC {
     }
 
 
+    private static class BackgroundWriterThread extends Thread {
+        public final Object sync = new Object();
 
+    }
 
 
 }

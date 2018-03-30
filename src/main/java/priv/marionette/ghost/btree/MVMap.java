@@ -92,6 +92,39 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return (V) result;
     }
 
+    protected Object put(Page p, long writeVersion, Object key, Object value) {
+        int index = p.binarySearch(key);
+        if (p.isLeaf()) {
+            if (index < 0) {
+                index = -index - 1;
+                p.insertLeaf(index, key, value);
+                return null;
+            }
+            return p.setValue(index, value);
+        }
+        // p是内部节点的情况下
+        if (index < 0) {
+            index = -index - 1;
+        } else {
+            index++;
+        }
+        //如果是内部节点，那么它的key对应的子节点也要用同一版本号复制一份
+        Page c = p.getChildPage(index).copy(writeVersion);
+        if (c.getMemory() > bTree.getPageSplitSize() && c.getKeyCount() > 1) {
+            // 自顶向下分裂
+            int at = c.getKeyCount() / 2;
+            Object k = c.getKey(at);
+            Page split = c.split(at);
+            p.setChild(index, split);
+            p.insertNode(index, k, c);
+            // now we are not sure where to add
+            return put(p, writeVersion, key, value);
+        }
+        Object result = put(c, writeVersion, key, value);
+        p.setChild(index, c);
+        return result;
+    }
+
     public int getId() {
         return id;
     }
@@ -99,6 +132,56 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     public BTreeWithMVCC getBTree() {
         return bTree;
     }
+
+    protected Page splitRootIfNeeded(Page p, long writeVersion) {
+        if (p.getMemory() <= bTree.getPageSplitSize() || p.getKeyCount() <= 1) {
+            return p;
+        }
+        int at = p.getKeyCount() / 2;
+        long totalCount = p.getTotalCount();
+        Object k = p.getKey(at);
+        Page split = p.split(at);
+        Object[] keys = { k };
+        Page.PageReference[] children = {
+                new Page.PageReference(p, p.getPos(), p.getTotalCount()),
+                new Page.PageReference(split, split.getPos(), split.getTotalCount()),
+        };
+        p = Page.create(this, writeVersion,
+                keys, null,
+                children,
+                totalCount, 0);
+        return p;
+    }
+
+    protected void newRoot(Page newRoot) {
+        if (root != newRoot) {
+            removeUnusedOldVersions();
+            if (root.getVersion() != newRoot.getVersion()) {
+                Page last = oldRoots.peekLast();
+                if (last == null || last.getVersion() != root.getVersion()) {
+                    oldRoots.add(root);
+                }
+            }
+            root = newRoot;
+        }
+    }
+
+    void removeUnusedOldVersions() {
+        long oldest = bTree.getOldestVersionToKeep();
+        if (oldest == -1) {
+            return;
+        }
+        Page last = oldRoots.peekLast();
+        while (true) {
+            Page p = oldRoots.peekFirst();
+            if (p == null || p.getVersion() >= oldest || p == last) {
+                break;
+            }
+            oldRoots.removeFirst(p);
+        }
+    }
+
+
 
 
     protected void beforeWrite() {

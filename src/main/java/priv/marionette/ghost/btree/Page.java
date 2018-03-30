@@ -140,6 +140,26 @@ public class Page {
         return version;
     }
 
+    public int getMemory() {
+        if (isPersistent()) {
+            if (BTreeWithMVCC.ASSERT) {
+                int mem = memory;
+                recalculateMemory();
+                if (mem != memory) {
+                    throw DataUtils.newIllegalStateException(
+                            DataUtils.ERROR_INTERNAL, "Memory calculation error");
+                }
+            }
+            return memory;
+        }
+        return getKeyCount();
+    }
+
+    public int getKeyCount() {
+        return keys.length;
+    }
+
+
     public boolean isLeaf() {
         return children == null;
     }
@@ -177,6 +197,12 @@ public class Page {
     void setVersion(long version) {
         this.version = version;
     }
+
+    public long getPos() {
+        return pos;
+    }
+
+
 
     static Page read(FileStore fileStore, long pos, MVMap<?, ?> map,
                      long filePos, long maxPos) {
@@ -275,6 +301,92 @@ public class Page {
         }
         recalculateMemory();
     }
+
+    public long getTotalCount() {
+        if (BTreeWithMVCC.ASSERT) {
+            long check = 0;
+            if (isLeaf()) {
+                check = keys.length;
+            } else {
+                for (PageReference x : children) {
+                    check += x.count;
+                }
+            }
+            if (check != totalCount) {
+                throw DataUtils.newIllegalStateException(
+                        DataUtils.ERROR_INTERNAL,
+                        "Expected: {0} got: {1}", check, totalCount);
+            }
+        }
+        return totalCount;
+    }
+
+    public Object getKey(int index) {
+        return keys[index];
+    }
+
+
+    Page split(int at) {
+        Page page = isLeaf() ? splitLeaf(at) : splitNode(at);
+        if(isPersistent()) {
+            recalculateMemory();
+        }
+        return page;
+    }
+
+    private Page splitLeaf(int at) {
+        int a = at, b = keys.length - a;
+        Object[] aKeys = new Object[a];
+        Object[] bKeys = new Object[b];
+        System.arraycopy(keys, 0, aKeys, 0, a);
+        System.arraycopy(keys, a, bKeys, 0, b);
+        keys = aKeys;
+        Object[] aValues = new Object[a];
+        Object[] bValues = new Object[b];
+        bValues = new Object[b];
+        System.arraycopy(values, 0, aValues, 0, a);
+        System.arraycopy(values, a, bValues, 0, b);
+        values = aValues;
+        totalCount = a;
+        Page newPage = create(map, version,
+                bKeys, bValues,
+                null,
+                b, 0);
+        return newPage;
+    }
+
+
+    private Page splitNode(int at) {
+        int a = at, b = keys.length - a;
+
+        Object[] aKeys = new Object[a];
+        Object[] bKeys = new Object[b - 1];
+        System.arraycopy(keys, 0, aKeys, 0, a);
+        System.arraycopy(keys, a + 1, bKeys, 0, b - 1);
+        keys = aKeys;
+
+        PageReference[] aChildren = new PageReference[a + 1];
+        PageReference[] bChildren = new PageReference[b];
+        System.arraycopy(children, 0, aChildren, 0, a + 1);
+        System.arraycopy(children, a + 1, bChildren, 0, b);
+        children = aChildren;
+
+        long t = 0;
+        for (PageReference x : aChildren) {
+            t += x.count;
+        }
+        totalCount = t;
+        t = 0;
+        for (PageReference x : bChildren) {
+            t += x.count;
+        }
+        Page newPage = create(map, version,
+                bKeys, null,
+                bChildren,
+                t, 0);
+        return newPage;
+    }
+
 
 
     /**
