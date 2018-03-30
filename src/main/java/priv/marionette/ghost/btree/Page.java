@@ -1,7 +1,10 @@
 package priv.marionette.ghost.btree;
 
+import priv.marionette.compress.Compressor;
 import priv.marionette.ghost.type.DataType;
 import priv.marionette.tools.DataUtils;
+
+import java.nio.ByteBuffer;
 
 /**
  * B树的节点
@@ -146,9 +149,132 @@ public class Page {
     }
 
 
+    public Page copy(long version) {
+        Page newPage = create(map, version,
+                keys, values,
+                children, totalCount,
+                memory);
+        // 旧版本逻辑删除
+        removePage();
+        newPage.cachedCompare = cachedCompare;
+        return newPage;
+    }
 
+    public void removePage() {
+        if(isPersistent()) {
+            long p = pos;
+            if (p == 0) {
+                removedInMemory = true;
+            }
+            map.removePage(p, memory);
+        }
+    }
 
+    private boolean isPersistent() {
+        return memory != IN_MEMORY;
+    }
 
+    void setVersion(long version) {
+        this.version = version;
+    }
+
+    static Page read(FileStore fileStore, long pos, MVMap<?, ?> map,
+                     long filePos, long maxPos) {
+        ByteBuffer buff;
+        int maxLength = DataUtils.getPageMaxLength(pos);
+        if (maxLength == DataUtils.PAGE_LARGE) {
+            buff = fileStore.readFully(filePos, 128);
+            maxLength = buff.getInt();
+            // read the first bytes again
+        }
+        maxLength = (int) Math.min(maxPos - filePos, maxLength);
+        int length = maxLength;
+        if (length < 0) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_FILE_CORRUPT,
+                    "Illegal page length {0} reading at {1}; max pos {2} ",
+                    length, filePos, maxPos);
+        }
+        buff = fileStore.readFully(filePos, length);
+        Page p = new Page(map, 0);
+        p.pos = pos;
+        int chunkId = DataUtils.getPageChunkId(pos);
+        int offset = DataUtils.getPageOffset(pos);
+        p.read(buff, chunkId, offset, maxLength);
+        return p;
+    }
+
+    void read(ByteBuffer buff, int chunkId, int offset, int maxLength) {
+        int start = buff.position();
+        int pageLength = buff.getInt();
+        if (pageLength > maxLength || pageLength < 4) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_FILE_CORRUPT,
+                    "File corrupted in chunk {0}, expected page length 4..{1}, got {2}",
+                    chunkId, maxLength, pageLength);
+        }
+        buff.limit(start + pageLength);
+        short check = buff.getShort();
+        int mapId = DataUtils.readVarInt(buff);
+        if (mapId != map.getId()) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_FILE_CORRUPT,
+                    "File corrupted in chunk {0}, expected map id {1}, got {2}",
+                    chunkId, map.getId(), mapId);
+        }
+        int checkTest = DataUtils.getCheckValue(chunkId)
+                ^ DataUtils.getCheckValue(offset)
+                ^ DataUtils.getCheckValue(pageLength);
+        if (check != (short) checkTest) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_FILE_CORRUPT,
+                    "File corrupted in chunk {0}, expected check value {1}, got {2}",
+                    chunkId, checkTest, check);
+        }
+        int len = DataUtils.readVarInt(buff);
+        keys = new Object[len];
+        int type = buff.get();
+        boolean node = (type & 1) == DataUtils.PAGE_TYPE_NODE;
+        if (node) {
+            children = new PageReference[len + 1];
+            long[] p = new long[len + 1];
+            for (int i = 0; i <= len; i++) {
+                p[i] = buff.getLong();
+            }
+            long total = 0;
+            for (int i = 0; i <= len; i++) {
+                long s = DataUtils.readVarLong(buff);
+                total += s;
+                children[i] = new PageReference(null, p[i], s);
+            }
+            totalCount = total;
+        }
+        boolean compressed = (type & DataUtils.PAGE_COMPRESSED) != 0;
+        if (compressed) {
+            Compressor compressor;
+            if ((type & DataUtils.PAGE_COMPRESSED_HIGH) ==
+                    DataUtils.PAGE_COMPRESSED_HIGH) {
+                compressor = map.getBTree().getCompressorHigh();
+            } else {
+                compressor = map.getBTree().getCompressorFast();
+            }
+            int lenAdd = DataUtils.readVarInt(buff);
+            int compLen = pageLength + start - buff.position();
+            byte[] comp = DataUtils.newBytes(compLen);
+            buff.get(comp);
+            int l = compLen + lenAdd;
+            buff = ByteBuffer.allocate(l);
+            compressor.expand(comp, 0, compLen, buff.array(),
+                    buff.arrayOffset(), l);
+        }
+        map.getKeyType().read(buff, keys, len, true);
+        if (!node) {
+            values = new Object[len];
+            map.getValueType().read(buff, values, len, false);
+            totalCount = len;
+        }
+        recalculateMemory();
+    }
 
 
     /**

@@ -1,5 +1,6 @@
-package priv.marionette.ghost;
+package priv.marionette.ghost.btree;
 
+import priv.marionette.ghost.WriteBuffer;
 import priv.marionette.tools.DataUtils;
 
 import java.nio.ByteBuffer;
@@ -184,7 +185,7 @@ public class Chunk {
     }
 
 
-    public void wirteChunkHeader(WriteBuffer buffer,int minLength){
+    public void wirteChunkHeader(WriteBuffer buffer, int minLength){
         long pos = buffer.position();
         buffer.put(asString().getBytes(StandardCharsets.ISO_8859_1));
         // 如果header长度不够则填充空白字符

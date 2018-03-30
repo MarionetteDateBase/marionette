@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentMap;
  * <p>
  * 当进行write操作时，如果数据在磁盘上，先从磁盘中读取相关数据至内存，
  * 然后在内存生成一个新的数据版本，最后在持久化时合并所有版本分支。
- * 以上策略常被人总结为：Copy On Write，用以提高并发性，常见应用有redis
+ * 以上策略常被人总结为：Copy On Write，用以提高并发性
  *
  *
  * @author Yue Yu
@@ -80,9 +80,42 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     @Override
     @SuppressWarnings("unchecked")
     public synchronized V put(K key, V value) {
-
+        DataUtils.checkArgument(value != null, "The value may not be null");
+        beforeWrite();
+        long v = writeVersion;
+        //写时复制
+        Page p = root.copy(v);
+        //判断节点是否需要分裂至半满
+        p = splitRootIfNeeded(p, v);
+        Object result = put(p, v, key, value);
+        newRoot(p);
+        return (V) result;
     }
 
+    public int getId() {
+        return id;
+    }
+
+    public BTreeWithMVCC getBTree() {
+        return bTree;
+    }
+
+
+    protected void beforeWrite() {
+        if (closed) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_CLOSED, "This map is closed");
+        }
+        if (readOnly) {
+            throw DataUtils.newUnsupportedOperationException(
+                    "This map is read-only");
+        }
+        bTree.beforeWrite(this);
+    }
+
+    protected void removePage(long pos, int memory) {
+        bTree.removePage(this, pos, memory);
+    }
 
     public long getVersion() {
         return root.getVersion();
@@ -100,9 +133,19 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return valueType;
     }
 
+    void setWriteVersion(long writeVersion) {
+        this.writeVersion = writeVersion;
+    }
+
+    void setRootPos(long rootPos, long version) {
+        root = rootPos == 0 ? Page.createEmpty(this, -1) : readPage(rootPos);
+        root.setVersion(version);
+    }
 
 
-
+    Page readPage(long pos) {
+        return bTree.readPage(this, pos);
+    }
 
 
 

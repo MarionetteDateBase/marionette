@@ -1,6 +1,8 @@
 package priv.marionette.ghost.btree;
 
 import priv.marionette.cache.LIRSCache;
+import priv.marionette.compress.CompressDeflate;
+import priv.marionette.compress.CompressLZF;
 import priv.marionette.compress.Compressor;
 import priv.marionette.ghost.*;
 import priv.marionette.ghost.type.StringDataType;
@@ -135,7 +137,7 @@ public final class BTreeWithMVCC {
         }
         this.fileStore = fileStore;
 
-        int pgSplitSize = 48; // for "mem:" case it is # of keys
+        int pgSplitSize = 48;
         LIRSCache.Config cc = null;
         if (this.fileStore != null) {
             int mb = DataUtils.getConfigParam(config, "cacheSize", 16);
@@ -314,17 +316,13 @@ public final class BTreeWithMVCC {
         if (closed) {
             return;
         }
-        // can not synchronize on this yet, because
-        // the thread also synchronized on this, which
-        // could result in a deadlock
         stopBackgroundThread();
         closed = true;
         synchronized (this) {
             if (fileStore != null && shrinkIfPossible) {
                 shrinkFileIfPossible(0);
             }
-            // release memory early - this is important when called
-            // because of out of memory
+            // 释放内存
             if (cache != null) {
                 cache.clear();
             }
@@ -349,15 +347,13 @@ public final class BTreeWithMVCC {
         }
         backgroundWriterThread = null;
         if (Thread.currentThread() == t) {
-            // within the thread itself - can not join
             return;
         }
         synchronized (t.sync) {
             t.sync.notifyAll();
         }
         if (Thread.holdsLock(this)) {
-            // called from storeNow: can not join,
-            // because that could result in a deadlock
+            // 如果正在进行持久化则放弃stop，避免造成死锁
             return;
         }
         try {
@@ -404,6 +400,18 @@ public final class BTreeWithMVCC {
         }
     }
 
+    void beforeWrite(MVMap<?, ?> map) {
+        if (saveNeeded) {
+            if (map == meta) {
+                //避免btree和concurrent control操作类同时持有锁从而引起死锁
+                return;
+            }
+            saveNeeded = false;
+            if (unsavedMemory > autoCommitMemory && autoCommitMemory > 0) {
+                commitAndSave();
+            }
+        }
+    }
 
 
     private synchronized long commitAndSave() {
@@ -449,14 +457,14 @@ public final class BTreeWithMVCC {
     }
 
 
+
+
     private long storeNowTry(){
         long time = getTimeSinceCreation();
         int freeDelay = retentionTime / 10;
         if (time >= lastFreeUnusedChunks + freeDelay) {
-            // set early in case it fails (out of memory or so)
             lastFreeUnusedChunks = time;
             freeUnusedChunks();
-            // set it here as well, to avoid calling it often if it was slow
             lastFreeUnusedChunks = getTimeSinceCreation();
         }
     }
@@ -513,8 +521,317 @@ public final class BTreeWithMVCC {
     }
 
 
+    void removePage(MVMap<?, ?> map, long pos, int memory) {
+        // 如果这个page还没有被持久化，那么作为旧版本临时保存
+        if (pos == 0) {
+            unsavedMemory = Math.max(0, unsavedMemory - memory);
+            return;
+        }
+
+        if (cache != null) {
+            if (DataUtils.getPageType(pos) == DataUtils.PAGE_TYPE_LEAF) {
+                // 只要不是叶子节点就继续暂时保存至cache，因为要让node参与垃圾回收
+                cache.remove(pos);
+            }
+        }
+
+        Chunk c = getChunk(pos);
+        long version = currentVersion;
+        if (map == meta && currentStoreVersion >= 0) {
+            if (Thread.currentThread() == currentStoreThread) {
+                // 如果page在删除的同时，其所属的chunk的对应持久化操作线程在执行持久化，
+                // 那么将被释放的page对应的chunk版本保存下来，以保证chunk的旧版本可用性
+                version = currentStoreVersion;
+            }
+        }
+        registerFreePage(version, c.id,
+                DataUtils.getPageMaxLength(pos), 1);
+    }
+
+    private void registerFreePage(long version, int chunkId,
+                                  long maxLengthLive, int pageCount) {
+        ConcurrentHashMap<Integer, Chunk> freed = freedPageSpace.get(version);
+        if (freed == null) {
+            freed = new ConcurrentHashMap<>();
+            ConcurrentHashMap<Integer, Chunk> f2 = freedPageSpace.putIfAbsent(version,
+                    freed);
+            if (f2 != null) {
+                freed = f2;
+            }
+        }
+        synchronized (freed) {
+            Chunk chunk = freed.get(chunkId);
+            if (chunk == null) {
+                chunk = new Chunk(chunkId);
+                Chunk chunk2 = freed.putIfAbsent(chunkId, chunk);
+                if (chunk2 != null) {
+                    chunk = chunk2;
+                }
+            }
+            chunk.maxLenLive -= maxLengthLive;
+            chunk.pageCountLive -= pageCount;
+        }
+    }
+
+    private Chunk getChunk(long pos) {
+        Chunk c = getChunkIfFound(pos);
+        if (c == null) {
+            int chunkId = DataUtils.getPageChunkId(pos);
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_FILE_CORRUPT,
+                    "Chunk {0} not found", chunkId);
+        }
+        return c;
+    }
 
 
+    private Chunk getChunkIfFound(long pos) {
+        int chunkId = DataUtils.getPageChunkId(pos);
+        Chunk c = chunks.get(chunkId);
+        if (c == null) {
+            checkOpen();
+            if (!Thread.holdsLock(this)) {
+                throw DataUtils.newIllegalStateException(
+                        DataUtils.ERROR_CHUNK_NOT_FOUND,
+                        "Chunk {0} no longer exists",
+                        chunkId);
+            }
+            String s = meta.get(Chunk.getMetaKey(chunkId));
+            if (s == null) {
+                return null;
+            }
+            c = Chunk.fromString(s);
+            if (c.block == Long.MAX_VALUE) {
+                throw DataUtils.newIllegalStateException(
+                        DataUtils.ERROR_FILE_CORRUPT,
+                        "Chunk {0} is invalid", chunkId);
+            }
+            chunks.put(c.id, c);
+        }
+        return c;
+    }
+
+    private synchronized void readStoreHeader() {
+        Chunk newest = null;
+        boolean validStoreHeader = false;
+        // 找到最新版本的chunk读取前两份区块
+        ByteBuffer fileHeaderBlocks = fileStore.readFully(0, 2 * BLOCK_SIZE);
+        byte[] buff = new byte[BLOCK_SIZE];
+        for (int i = 0; i <= BLOCK_SIZE; i += BLOCK_SIZE) {
+            fileHeaderBlocks.get(buff);
+            try {
+                HashMap<String, String> m = DataUtils.parseChecksummedMap(buff);
+                if (m == null)
+                    continue;
+                int blockSize = DataUtils.readHexInt(
+                        m, "blockSize", BLOCK_SIZE);
+                if (blockSize != BLOCK_SIZE) {
+                    throw DataUtils.newIllegalStateException(
+                            DataUtils.ERROR_UNSUPPORTED_FORMAT,
+                            "Block size {0} is currently not supported",
+                            blockSize);
+                }
+                long version = DataUtils.readHexLong(m, "version", 0);
+                if (newest == null || version > newest.version) {
+                    validStoreHeader = true;
+                    storeHeader.putAll(m);
+                    creationTime = DataUtils.readHexLong(m, "created", 0);
+                    int chunkId = DataUtils.readHexInt(m, "chunk", 0);
+                    long block = DataUtils.readHexLong(m, "block", 0);
+                    Chunk test = readChunkHeaderAndFooter(block);
+                    if (test != null && test.id == chunkId) {
+                        newest = test;
+                    }
+                }
+            } catch (Exception e) {
+                continue;
+            }
+        }
+        if (!validStoreHeader) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_FILE_CORRUPT,
+                    "Store header is corrupt: {0}", fileStore);
+        }
+        long format = DataUtils.readHexLong(storeHeader, "format", 1);
+        if (format > FORMAT_WRITE && !fileStore.isReadOnly()) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_UNSUPPORTED_FORMAT,
+                    "The write format {0} is larger " +
+                            "than the supported format {1}, " +
+                            "and the file was not opened in read-only mode",
+                    format, FORMAT_WRITE);
+        }
+        format = DataUtils.readHexLong(storeHeader, "formatRead", format);
+        if (format > FORMAT_READ) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_UNSUPPORTED_FORMAT,
+                    "The read format {0} is larger " +
+                            "than the supported format {1}",
+                    format, FORMAT_READ);
+        }
+        lastStoredVersion = -1;
+        chunks.clear();
+        long now = System.currentTimeMillis();
+        // calculate the year (doesn't have to be exact;
+        // we assume 365.25 days per year, * 4 = 1461)
+        int year =  1970 + (int) (now / (1000L * 60 * 60 * 6 * 1461));
+        if (year < 2014) {
+            // if the year is before 2014,
+            // we assume the system doesn't have a real-time clock,
+            // and we set the creationTime to the past, so that
+            // existing chunks are overwritten
+            creationTime = now - fileStore.getDefaultRetentionTime();
+        } else if (now < creationTime) {
+            // the system time was set to the past:
+            // we change the creation time
+            creationTime = now;
+            storeHeader.put("created", creationTime);
+        }
+        Chunk test = readChunkFooter(fileStore.size());
+        if (test != null) {
+            test = readChunkHeaderAndFooter(test.block);
+            if (test != null) {
+                if (newest == null || test.version > newest.version) {
+                    newest = test;
+                }
+            }
+        }
+        if (newest == null) {
+            // no chunk
+            return;
+        }
+        // read the chunk header and footer,
+        // and follow the chain of next chunks
+        while (true) {
+            if (newest.next == 0 ||
+                    newest.next >= fileStore.size() / BLOCK_SIZE) {
+                // no (valid) next
+                break;
+            }
+            test = readChunkHeaderAndFooter(newest.next);
+            if (test == null || test.id <= newest.id) {
+                break;
+            }
+            newest = test;
+        }
+        setLastChunk(newest);
+        loadChunkMeta();
+        // read all chunk headers and footers within the retention time,
+        // to detect unwritten data after a power failure
+        verifyLastChunks();
+        for (Chunk c : chunks.values()) {
+            if (c.pageCountLive == 0) {
+                registerFreePage(currentVersion, c.id, 0, 0);
+            }
+            long start = c.block * BLOCK_SIZE;
+            int length = c.len * BLOCK_SIZE;
+            fileStore.markUsed(start, length);
+        }
+    }
+
+
+    private void setLastChunk(Chunk last) {
+        lastChunk = last;
+        if (last == null) {
+            // no valid chunk
+            lastMapId = 0;
+            currentVersion = 0;
+            meta.setRootPos(0, -1);
+        } else {
+            lastMapId = last.mapId;
+            currentVersion = last.version;
+            chunks.put(last.id, last);
+            meta.setRootPos(last.metaRootPos, -1);
+        }
+        setWriteVersion(currentVersion);
+    }
+
+    private void setWriteVersion(long version) {
+        for (MVMap<?, ?> map : maps.values()) {
+            map.setWriteVersion(version);
+        }
+        MVMap<String, String> m = meta;
+        if (m == null) {
+            checkOpen();
+        }
+        m.setWriteVersion(version);
+    }
+
+
+    private Chunk readChunkHeaderAndFooter(long block) {
+        Chunk header;
+        try {
+            header = readChunkHeader(block);
+        } catch (Exception e) {
+            // invalid chunk header: ignore, but stop
+            return null;
+        }
+        if (header == null) {
+            return null;
+        }
+        Chunk footer = readChunkFooter((block + header.len) * BLOCK_SIZE);
+        if (footer == null || footer.id != header.id) {
+            return null;
+        }
+        return header;
+    }
+
+    private Chunk readChunkHeader(long block) {
+        long p = block * BLOCK_SIZE;
+        ByteBuffer buff = fileStore.readFully(p, Chunk.MAX_HEADER_LENGTH);
+        return Chunk.readChunkHeader(buff, p);
+    }
+
+
+    private Chunk readChunkFooter(long end) {
+        try {
+            // 读取chunk的最后一个区块
+            ByteBuffer lastBlock = fileStore.readFully(
+                    end - Chunk.FOOTER_LENGTH, Chunk.FOOTER_LENGTH);
+            byte[] buff = new byte[Chunk.FOOTER_LENGTH];
+            lastBlock.get(buff);
+            HashMap<String, String> m = DataUtils.parseChecksummedMap(buff);
+            if (m != null) {
+                int chunk = DataUtils.readHexInt(m, "chunk", 0);
+                Chunk c = new Chunk(chunk);
+                c.version = DataUtils.readHexLong(m, "version", 0);
+                c.block = DataUtils.readHexLong(m, "block", 0);
+                return c;
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+        return null;
+    }
+
+    Page readPage(MVMap<?, ?> map, long pos) {
+        if (pos == 0) {
+            throw DataUtils.newIllegalStateException(
+                    DataUtils.ERROR_FILE_CORRUPT, "Position 0");
+        }
+        Page p = cache == null ? null : cache.get(pos);
+        if (p == null) {
+            Chunk c = getChunk(pos);
+            long filePos = c.block * BLOCK_SIZE;
+            filePos += DataUtils.getPageOffset(pos);
+            if (filePos < 0) {
+                throw DataUtils.newIllegalStateException(
+                        DataUtils.ERROR_FILE_CORRUPT,
+                        "Negative position {0}", filePos);
+            }
+            long maxPos = (c.block + c.len) * BLOCK_SIZE;
+            p = Page.read(fileStore, pos, map, filePos, maxPos);
+            cachePage(pos, p, p.getMemory());
+        }
+        return p;
+    }
+
+
+    void cachePage(long pos, Page page, int memory) {
+        if (cache != null) {
+            cache.put(pos, page, memory);
+        }
+    }
 
 
 
@@ -522,6 +839,20 @@ public final class BTreeWithMVCC {
     private static class BackgroundWriterThread extends Thread {
         public final Object sync = new Object();
 
+    }
+
+    Compressor getCompressorFast() {
+        if (compressorFast == null) {
+            compressorFast = new CompressLZF();
+        }
+        return compressorFast;
+    }
+
+    Compressor getCompressorHigh() {
+        if (compressorHigh == null) {
+            compressorHigh = new CompressDeflate();
+        }
+        return compressorHigh;
     }
 
 
