@@ -422,6 +422,95 @@ public class Page {
         return -(low+1);
     }
 
+    /**
+     * 往叶子节点添加键值对
+     *
+     * @param index the index
+     * @param key the key
+     * @param value the value
+     */
+    public void insertLeaf(int index, Object key, Object value) {
+        int len = keys.length + 1;
+        Object[] newKeys = new Object[len];
+        DataUtils.copyWithGap(keys, newKeys, len - 1, index);
+        keys = newKeys;
+        Object[] newValues = new Object[len];
+        DataUtils.copyWithGap(values, newValues, len - 1, index);
+        values = newValues;
+        keys[index] = key;
+        values[index] = value;
+        totalCount++;
+        if(isPersistent()) {
+            addMemory(map.getKeyType().getMemory(key) +
+                    map.getValueType().getMemory(value));
+        }
+    }
+
+    public Object setValue(int index, Object value) {
+        Object old = values[index];
+        //深拷贝
+        values = values.clone();
+        DataType valueType = map.getValueType();
+        if(isPersistent()) {
+            addMemory(valueType.getMemory(value) -
+                    valueType.getMemory(old));
+        }
+        values[index] = value;
+        return old;
+    }
+
+    public void setChild(int index, Page c) {
+        if (c == null) {
+            long oldCount = children[index].count;
+            // this is slightly slower:
+            // children = Arrays.copyOf(children, children.length);
+            children = children.clone();
+            PageReference ref = new PageReference(null, 0, 0);
+            children[index] = ref;
+            totalCount -= oldCount;
+        } else if (c != children[index].page ||
+                c.getPos() != children[index].pos) {
+            long oldCount = children[index].count;
+            // this is slightly slower:
+            // children = Arrays.copyOf(children, children.length);
+            children = children.clone();
+            PageReference ref = new PageReference(c, c.pos, c.totalCount);
+            children[index] = ref;
+            totalCount += c.totalCount - oldCount;
+        }
+    }
+
+
+    public void insertNode(int index, Object key, Page childPage) {
+
+        Object[] newKeys = new Object[keys.length + 1];
+        DataUtils.copyWithGap(keys, newKeys, keys.length, index);
+        newKeys[index] = key;
+        keys = newKeys;
+
+        int childCount = children.length;
+        PageReference[] newChildren = new PageReference[childCount + 1];
+        DataUtils.copyWithGap(children, newChildren, childCount, index);
+        newChildren[index] = new PageReference(
+                childPage, childPage.getPos(), childPage.totalCount);
+        children = newChildren;
+
+        totalCount += childPage.totalCount;
+        if(isPersistent()) {
+            addMemory(map.getKeyType().getMemory(key) +
+                    DataUtils.PAGE_MEMORY_CHILD);
+        }
+    }
+
+    /**
+     * 根据index获取响应的子节点
+     * @param index
+     * @return
+     */
+    public Page getChildPage(int index) {
+        PageReference ref = children[index];
+        return ref.page != null ? ref.page : map.readPage(ref.pos);
+    }
 
     /**
      * 记录多少被当前page引用/间接引用的其他pages的信息，通过引用计数法判断chunks的使用率，
