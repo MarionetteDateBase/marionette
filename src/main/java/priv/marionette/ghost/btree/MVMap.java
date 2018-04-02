@@ -125,6 +125,11 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return result;
     }
 
+
+    int compare(Object a, Object b) {
+        return keyType.compare(a, b);
+    }
+
     public int getId() {
         return id;
     }

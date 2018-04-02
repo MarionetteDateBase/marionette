@@ -388,6 +388,40 @@ public class Page {
     }
 
 
+    /**
+     * 记忆化二分搜索，将最近的一次搜索结果的index保存起来，
+     * 以此应对相同字段的冗余搜索,这样每次搜索的起点并不同
+     * 于常规的二分搜索(中点)。所以，所谓的算法是一种思想，
+     * 是一种从计算机的角度看世界的方法，而不是现在很多人所
+     * 理解的刻板的"模型"，或者解决问题甚至沦为装X的工具，这
+     * 样的人写出的代码是没有自己的灵魂的。
+     * 希望正在阅读的人可以感悟到作者此刻的心情。
+     * @param key
+     * @return
+     */
+    public int binarySearch(Object key){
+        int low =0,high = keys.length -1;
+        int x = cachedCompare-1;
+        if(x < 0 || x > high){
+            x = high >>> 1;
+        }
+        while (low <= high){
+            int result = map.compare(key,keys[x]);
+            if(result > 0){
+                low = x+1;
+            }
+            else  if(result < 0){
+                high = x-1;
+            }else {
+                cachedCompare = x +1;
+                return x;
+            }
+            x = (low+high) >>> 1;
+        }
+        cachedCompare = low;
+        return -(low+1);
+    }
+
 
     /**
      * 记录多少被当前page引用/间接引用的其他pages的信息，通过引用计数法判断chunks的使用率，
