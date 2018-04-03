@@ -4,8 +4,10 @@ import priv.marionette.ghost.type.DataType;
 import priv.marionette.tools.ConcurrentArrayList;
 import priv.marionette.tools.DataUtils;
 
+import java.util.AbstractList;
 import java.util.AbstractMap;
 import java.util.HashMap;
+import java.util.List;
 import java.util.concurrent.ConcurrentMap;
 
 /**
@@ -188,7 +190,6 @@ public class MVMap<K,V> extends AbstractMap<K, V>
 
 
 
-
     protected void beforeWrite() {
         if (closed) {
             throw DataUtils.newIllegalStateException(
@@ -234,6 +235,91 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     Page readPage(long pos) {
         return bTree.readPage(this, pos);
     }
+
+
+    public List<K> keyList() {
+        return new AbstractList<K>() {
+
+            @Override
+            public K get(int index) {
+                return getKey(index);
+            }
+
+            @Override
+            public int size() {
+                return MVMap.this.size();
+            }
+
+            @Override
+            @SuppressWarnings("unchecked")
+            public int indexOf(Object key) {
+                return (int) getKeyIndex((K) key);
+            }
+
+        };
+    }
+
+
+    public K getKey(long index) {
+        if (index < 0 || index >= size()) {
+            return null;
+        }
+        Page p = root;
+        long offset = 0;
+        while (true) {
+            if (p.isLeaf()) {
+                if (index >= offset + p.getKeyCount()) {
+                    return null;
+                }
+                return (K) p.getKey((int) (index - offset));
+            }
+            int i = 0, size = getChildPageCount(p);
+            for (; i < size; i++) {
+                long c = p.getCounts(i);
+                if (index < c + offset) {
+                    break;
+                }
+                offset += c;
+            }
+            if (i == size) {
+                return null;
+            }
+            p = p.getChildPage(i);
+        }
+    }
+
+    public long getKeyIndex(K key) {
+        if (size() == 0) {
+            return -1;
+        }
+        Page p = root;
+        long offset = 0;
+        while (true) {
+            int x = p.binarySearch(key);
+            if (p.isLeaf()) {
+                if (x < 0) {
+                    return -offset + x;
+                }
+                return offset + x;
+            }
+            if (x < 0) {
+                x = -x - 1;
+            } else {
+                x++;
+            }
+            for (int i = 0; i < x; i++) {
+                offset += p.getCounts(i);
+            }
+            p = p.getChildPage(x);
+        }
+    }
+
+
+
+    protected int getChildPageCount(Page p) {
+        return p.getRawChildPageCount();
+    }
+
 
 
 
