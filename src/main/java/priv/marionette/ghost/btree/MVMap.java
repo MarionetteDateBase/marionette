@@ -314,6 +314,27 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         }
     }
 
+    @Override
+    public synchronized V putIfAbsent(K key, V value) {
+        V old = get(key);
+        if (old == null) {
+            put(key, value);
+        }
+        return old;
+    }
+
+    @Override
+    public synchronized boolean remove(Object key,Object value){
+        V old = get(key);
+        if (areValuesEqual(old, value)) {
+            remove(key);
+            return true;
+        }
+        return false;
+    }
+
+
+
 
 
     protected int getChildPageCount(Page p) {
