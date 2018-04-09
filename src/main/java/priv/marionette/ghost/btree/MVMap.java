@@ -368,7 +368,21 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     }
 
 
-
+    /**
+     * 根据指定的key替换value
+     * @param key
+     * @param value
+     * @return
+     */
+    @Override
+    public synchronized  V replace(K key,V value){
+        V old = get(key);
+        if (old != null) {
+            put(key, value);
+            return old;
+        }
+        return null;
+    }
 
 
 
