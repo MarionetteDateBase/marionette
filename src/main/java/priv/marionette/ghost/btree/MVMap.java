@@ -334,6 +334,42 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     }
 
 
+    /**
+     * 根据指定的序列化类型比较value的大小
+     * @param a
+     * @param b
+     * @return
+     */
+    public boolean areValuesEqual(Object a, Object b) {
+        if (a == b) {
+            return true;
+        } else if (a == null || b == null) {
+            return false;
+        }
+        return valueType.compare(a, b) == 0;
+    }
+
+
+    /**
+     * 根据指定的key将指定的old value替换为new value
+     * @param key
+     * @param oldValue
+     * @param newValue
+     * @return
+     */
+    @Override
+    public synchronized boolean replace(K key, V oldValue, V newValue) {
+        V old = get(key);
+        if (areValuesEqual(old, oldValue)) {
+            put(key, newValue);
+            return true;
+        }
+        return false;
+    }
+
+
+
+
 
 
 
