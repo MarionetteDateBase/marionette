@@ -34,9 +34,8 @@ public class Cursor<K, V> implements Iterator<K> {
 
 
 
-
     /**
-     * 从指定的key开始搜索下一个lager值
+     * 从指定的p节点开始压栈
      * @param p
      * @param from
      */
@@ -59,6 +58,32 @@ public class Cursor<K, V> implements Iterator<K> {
             pos = new CursorPos(p, x + 1, pos);
             p = p.getChildPage(x);
         }
+    }
+
+
+    /**
+     * 从栈低pop出非递减序列中的一个值，耗尽当前节点后向上backtrace,
+     * 然后从新一个pop出的栈节点的开始重新压栈，故此间2个函数结合，
+     * 实现了对b树的深度优先搜索
+     */
+    @SuppressWarnings("unchecked")
+    private void fetchNext() {
+        while (pos != null) {
+            if (pos.index < pos.page.getKeyCount()) {
+                int index = pos.index++;
+                current = (K) pos.page.getKey(index);
+                currentValue = (V) pos.page.getValue(index);
+                return;
+            }
+            pos = pos.parent;
+            if (pos == null) {
+                break;
+            }
+            if (pos.index < map.getChildPageCount(pos.page)) {
+                min(pos.page.getChildPage(pos.index++), null);
+            }
+        }
+        current = null;
     }
 
 
