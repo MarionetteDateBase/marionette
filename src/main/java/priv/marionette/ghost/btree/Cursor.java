@@ -32,6 +32,14 @@ public class Cursor<K, V> implements Iterator<K> {
         this.from = from;
     }
 
+
+
+
+    /**
+     * 从指定的key开始搜索下一个lager值
+     * @param p
+     * @param from
+     */
     private void min(Page p, K from) {
         while (true) {
             if (p.isLeaf()) {
@@ -52,5 +60,7 @@ public class Cursor<K, V> implements Iterator<K> {
             p = p.getChildPage(x);
         }
     }
+
+
 
 }
