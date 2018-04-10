@@ -1,5 +1,7 @@
 package priv.marionette.ghost.btree;
 
+import java.util.Iterator;
+
 /**
  * B树的先序遍历
  * 与传统先序遍历逻辑类似，在dfs到最左叶子节点后，
@@ -13,8 +15,42 @@ package priv.marionette.ghost.btree;
  * @author Yue Yu
  * @create 2018-04-10 下午12:23
  **/
-public class Cursor {
+public class Cursor<K, V> implements Iterator<K> {
 
+    private final MVMap<K, ?> map;
+    private final K from;
+    private CursorPos pos;
+    private K current, last;
+    private V currentValue, lastValue;
+    private Page lastPage;
+    private final Page root;
+    private boolean initialized;
 
+    Cursor(MVMap<K, ?> map, Page root, K from) {
+        this.map = map;
+        this.root = root;
+        this.from = from;
+    }
+
+    private void min(Page p, K from) {
+        while (true) {
+            if (p.isLeaf()) {
+                int x = from == null ? 0 : p.binarySearch(from);
+                if (x < 0) {
+                    x = -x - 1;
+                }
+                pos = new CursorPos(p, x, pos);
+                break;
+            }
+            int x = from == null ? -1 : p.binarySearch(from);
+            if (x < 0) {
+                x = -x - 1;
+            } else {
+                x++;
+            }
+            pos = new CursorPos(p, x + 1, pos);
+            p = p.getChildPage(x);
+        }
+    }
 
 }
