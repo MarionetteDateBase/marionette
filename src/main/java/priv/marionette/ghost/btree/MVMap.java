@@ -4,10 +4,7 @@ import priv.marionette.ghost.type.DataType;
 import priv.marionette.tools.ConcurrentArrayList;
 import priv.marionette.tools.DataUtils;
 
-import java.util.AbstractList;
-import java.util.AbstractMap;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 
 /**
@@ -384,13 +381,58 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return null;
     }
 
+    @Override
+    public Set<Map.Entry<K, V>> entrySet() {
+        final MVMap<K, V> map = this;
+        final Page root = this.root;
+        return new AbstractSet<Entry<K, V>>() {
+
+            @Override
+            public Iterator<Entry<K, V>> iterator() {
+                final Cursor<K, V> cursor = new Cursor<>(map, root, null);
+                return new Iterator<Entry<K, V>>() {
+
+                    @Override
+                    public boolean hasNext() {
+                        return cursor.hasNext();
+                    }
+
+                    @Override
+                    public Entry<K, V> next() {
+                        K k = cursor.next();
+                        return new DataUtils.MapEntry<>(k, cursor.getValue());
+                    }
+
+                    @Override
+                    public void remove() {
+                        throw DataUtils.newUnsupportedOperationException(
+                                "Removing is not supported");
+                    }
+                };
+
+            }
+
+            @Override
+            public int size() {
+                return MVMap.this.size();
+            }
+
+            @Override
+            public boolean contains(Object o) {
+                return MVMap.this.containsKey(o);
+            }
+
+        };
+
+    }
+
+
 
 
 
     protected int getChildPageCount(Page p) {
         return p.getRawChildPageCount();
     }
-
 
 
 
