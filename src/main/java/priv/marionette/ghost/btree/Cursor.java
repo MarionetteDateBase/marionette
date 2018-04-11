@@ -1,5 +1,7 @@
 package priv.marionette.ghost.btree;
 
+import priv.marionette.tools.DataUtils;
+
 import java.util.Iterator;
 
 /**
@@ -33,6 +35,61 @@ public class Cursor<K, V> implements Iterator<K> {
     }
 
 
+    @Override
+    public boolean hasNext() {
+        if (!initialized) {
+            min(root, from);
+            initialized = true;
+            fetchNext();
+        }
+        return current != null;
+    }
+
+    @Override
+    public K next() {
+        hasNext();
+        K c = current;
+        last = current;
+        lastValue = currentValue;
+        lastPage = pos == null ? null : pos.page;
+        fetchNext();
+        return c;
+    }
+
+    public K getKey() {
+        return last;
+    }
+
+    public V getValue() {
+        return lastValue;
+    }
+
+    Page getPage() {
+        return lastPage;
+    }
+
+    public void skip(long n) {
+        if (!hasNext()) {
+            return;
+        }
+        if (n < 10) {
+            while (n-- > 0) {
+                fetchNext();
+            }
+            return;
+        }
+        long index = map.getKeyIndex(current);
+        K k = map.getKey(index + n);
+        pos = null;
+        min(root, k);
+        fetchNext();
+    }
+
+    @Override
+    public void remove() {
+        throw DataUtils.newUnsupportedOperationException(
+                "Removing is not supported");
+    }
 
     /**
      * 从指定的p节点开始压栈

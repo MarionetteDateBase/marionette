@@ -459,6 +459,11 @@ public class Page {
         return old;
     }
 
+    public Object getValue(int index) {
+        return values[index];
+    }
+
+
     public void setChild(int index, Page c) {
         if (c == null) {
             long oldCount = children[index].count;
