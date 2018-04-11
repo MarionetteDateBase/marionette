@@ -882,9 +882,58 @@ public final class BTreeWithMVCC {
         return compressorHigh;
     }
 
+    /**
+     * 后台定时commit，策略和mongodb一致，而不同于lucene默认的内存阀值策略
+     */
+    void writeInBackground() {
+
+        long time = getTimeSinceCreation();
+
+        if (time <= lastCommitTime + autoCommitDelay) {
+            return;
+        }
+
+
+
+    }
 
     private static class BackgroundWriterThread extends Thread {
+
+        /**
+         * 同步锁
+         */
         public final Object sync = new Object();
+
+        private final BTreeWithMVCC bTree;
+
+        private final int sleep;
+
+        BackgroundWriterThread(BTreeWithMVCC bTree, int sleep, String fileStoreName) {
+            super("BTree background writer " + fileStoreName);
+            this.bTree = bTree;
+            this.sleep = sleep;
+            setDaemon(true);
+        }
+
+        @Override
+        public void run() {
+            while (true) {
+                Thread t = bTree.backgroundWriterThread;
+                if (t == null) {
+                    break;
+                }
+                synchronized (sync) {
+                    try {
+                        sync.wait(sleep);
+                    } catch (InterruptedException e) {
+                        continue;
+                    }
+                }
+                bTree.writeInBackground();
+            }
+        }
+
+
 
     }
 
