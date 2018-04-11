@@ -206,8 +206,7 @@ public final class BTreeWithMVCC {
             }
             lastCommitTime = getTimeSinceCreation();
 
-            // setAutoCommitDelay starts the thread, but only if
-            // the parameter is different from the old value
+            // autoCommit慢启动
             int delay = DataUtils.getConfigParam(config, "autoCommitDelay", 1000);
             setAutoCommitDelay(delay);
         } else {
@@ -677,8 +676,7 @@ public final class BTreeWithMVCC {
         lastStoredVersion = -1;
         chunks.clear();
         long now = System.currentTimeMillis();
-        // calculate the year (doesn't have to be exact;
-        // we assume 365.25 days per year, * 4 = 1461)
+        // 按四年1461天计算
         int year =  1970 + (int) (now / (1000L * 60 * 60 * 6 * 1461));
         if (year < 2014) {
             // if the year is before 2014,
@@ -871,6 +869,7 @@ public final class BTreeWithMVCC {
         public final Object sync = new Object();
 
     }
+
 
 
 }
