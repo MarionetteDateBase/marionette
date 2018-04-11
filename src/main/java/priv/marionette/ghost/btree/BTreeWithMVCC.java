@@ -216,7 +216,25 @@ public final class BTreeWithMVCC {
 
     }
 
-
+    public void setAutoCommitDelay(int millis) {
+        if (autoCommitDelay == millis) {
+            return;
+        }
+        autoCommitDelay = millis;
+        if (fileStore == null || fileStore.isReadOnly()) {
+            return;
+        }
+        stopBackgroundThread();
+        // start the background thread if needed
+        if (millis > 0) {
+            int sleep = Math.max(1, millis / 10);
+            BackgroundWriterThread t =
+                    new BackgroundWriterThread(this, sleep,
+                            fileStore.toString());
+            t.start();
+            backgroundWriterThread = t;
+        }
+    }
 
     public long getCurrentVersion() {
         return currentVersion;
