@@ -924,6 +924,36 @@ public final class BTreeWithMVCC {
 
     }
 
+    /**
+     * 将full chunk的数据分配到low fill rate chunk中
+     * @param targetFillRate
+     * @param write
+     * @return
+     */
+    public boolean compact(int targetFillRate, int write) {
+        if (!reuseSpace) {
+            return false;
+        }
+        synchronized (compactSync) {
+            checkOpen();
+            ArrayList<Chunk> old;
+            synchronized (this) {
+                old = compactGetOldChunks(targetFillRate, write);
+            }
+            if (old == null || old.isEmpty()) {
+                return false;
+            }
+            compactRewrite(old);
+            return true;
+        }
+    }
+
+
+
+
+
+
+
     private static class BackgroundWriterThread extends Thread {
 
         /**
