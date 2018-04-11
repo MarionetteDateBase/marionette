@@ -15,7 +15,7 @@ import java.text.MessageFormat;
 import java.util.*;
 
 /**
- * Utility methods
+ * 数据处理核心工具类
  */
 public final class DataUtils {
 
