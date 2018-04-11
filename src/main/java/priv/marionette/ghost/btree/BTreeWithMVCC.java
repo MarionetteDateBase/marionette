@@ -883,16 +883,43 @@ public final class BTreeWithMVCC {
     }
 
     /**
-     * 后台定时commit，策略和mongodb一致，而不同于lucene默认的内存阀值策略
+     * 后台定时commit，策略和mongodb一致(fork sub-process)，而不同于lucene默认的内存阀值策略
      */
     void writeInBackground() {
 
-        long time = getTimeSinceCreation();
+        try {
+            long time = getTimeSinceCreation();
 
-        if (time <= lastCommitTime + autoCommitDelay) {
-            return;
+            if (time <= lastCommitTime + autoCommitDelay) {
+                return;
+            }
+
+            if (hasUnsavedChanges()) {
+                try {
+                    commitAndSave();
+                } catch (Throwable e) {
+                    handleException(e);
+                    return;
+                }
+            }
+
+            if (autoCompactFillRate > 0) {
+                boolean fileOps;
+                long fileOpCount = fileStore.getWriteCount() + fileStore.getReadCount();
+                if (autoCompactLastFileOpCount != fileOpCount) {
+                    fileOps = true;
+                } else {
+                    fileOps = false;
+                }
+                // 如果有任何文件操作，执行一个较低的fill rate
+                int fillRate = fileOps ? autoCompactFillRate / 3 : autoCompactFillRate;
+                compact(fillRate, autoCommitMemory);
+                autoCompactLastFileOpCount = fileStore.getWriteCount() + fileStore.getReadCount();
+            }
+
+        }catch (Throwable e){
+            handleException(e);
         }
-
 
 
     }
