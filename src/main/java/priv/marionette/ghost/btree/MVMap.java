@@ -426,6 +426,30 @@ public class MVMap<K,V> extends AbstractMap<K, V>
 
     }
 
+    boolean rewrite(Set<Integer> set) {
+        // 回退至上一个版本并以此信息重写chunk，避免产生并发问题
+        long previousVersion = bTree.getCurrentVersion() - 1;
+        if (previousVersion < createVersion) {
+            return true;
+        }
+        MVMap<K, V> readMap;
+        try {
+            readMap = openVersion(previousVersion);
+        } catch (IllegalArgumentException e) {
+            return true;
+        }
+        try {
+            rewrite(readMap.root, set);
+            return true;
+        } catch (IllegalStateException e) {
+            if (DataUtils.getErrorCode(e.getMessage()) == DataUtils.ERROR_CHUNK_NOT_FOUND) {
+                // ignore
+                return false;
+            }
+            throw e;
+        }
+    }
+
 
 
 
