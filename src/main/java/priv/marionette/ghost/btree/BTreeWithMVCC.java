@@ -883,7 +883,7 @@ public final class BTreeWithMVCC {
     }
 
     /**
-     * 后台定时commit，策略和mongodb一致(fork sub-process)，而不同于lucene默认的内存阀值策略
+     * 后台定时commit，策略和mongodb一致(mongo会fork sub-process)，而不同于lucene默认的内存阀值策略
      */
     void writeInBackground() {
 
@@ -949,8 +949,37 @@ public final class BTreeWithMVCC {
     }
 
 
+    private ArrayList<Chunk> compactGetOldChunks(int targetFillRate, int write) {
+
+        if (lastChunk == null) {
+            return null;
+        }
+
+        long maxLengthSum = 0;
+        long maxLengthLiveSum = 0;
+
+        long time = getTimeSinceCreation();
+
+        for (Chunk c : chunks.values()) {
+            //不回收年轻代
+            if (c.time + retentionTime > time) {
+                continue;
+            }
+            maxLengthSum += c.maxLen;
+            maxLengthLiveSum += c.maxLenLive;
+        }
+
+        if (maxLengthLiveSum < 0) {
+            return null;
+        }
 
 
+
+
+
+
+
+    }
 
 
 
