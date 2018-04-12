@@ -987,6 +987,64 @@ public final class BTreeWithMVCC {
         //老年代
         ArrayList<Chunk> old = New.arrayList();
 
+        Chunk last = chunks.get(lastChunk.id);
+
+        for (Chunk c : chunks.values()) {
+            if (c.time + retentionTime > time) {
+                continue;
+            }
+            long age = last.version - c.version + 1;
+            c.collectPriority = (int) (c.getFillRate() * 1000 / age);
+            old.add(c);
+        }
+        if (old.isEmpty()) {
+            return null;
+        }
+
+        Collections.sort(old, new Comparator<Chunk>() {
+            @Override
+            public int compare(Chunk o1, Chunk o2) {
+                int comp = Integer.compare(o1.collectPriority,
+                        o2.collectPriority);
+                if (comp == 0) {
+                    comp = Long.compare(o1.maxLenLive,
+                            o2.maxLenLive);
+                }
+                return comp;
+            }
+        });
+
+        long written = 0;
+        int chunkCount = 0;
+
+        Chunk move = null;
+
+        for (Chunk c : old) {
+            if (move != null) {
+                if (c.collectPriority > 0 && written > write) {
+                    break;
+                }
+            }
+            written += c.maxLenLive;
+            chunkCount++;
+            move = c;
+        }
+
+        if (chunkCount < 1) {
+            return null;
+        }
+
+        boolean remove = false;
+        for (Iterator<Chunk> it = old.iterator(); it.hasNext();) {
+            Chunk c = it.next();
+            if (move == c) {
+                remove = true;
+            } else if (remove) {
+                it.remove();
+            }
+        }
+        return old;
+
     }
 
 
