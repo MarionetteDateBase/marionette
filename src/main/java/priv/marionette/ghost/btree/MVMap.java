@@ -451,6 +451,45 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     }
 
 
+    public MVMap<K, V> openVersion(long version) {
+        if (readOnly) {
+            throw DataUtils.newUnsupportedOperationException(
+                    "This map is read-only; need to call " +
+                            "the method on the writable map");
+        }
+        DataUtils.checkArgument(version >= createVersion,
+                "Unknown version {0}; this map was created in version is {1}",
+                version, createVersion);
+        Page newest = null;
+        // need to copy because it can change
+        Page r = root;
+        if (version >= r.getVersion() &&
+                (version == writeVersion ||
+                        r.getVersion() >= 0 ||
+                        version <= createVersion ||
+                        bTree.getFileStore() == null)) {
+            newest = r;
+        } else {
+            Page last = oldRoots.peekFirst();
+            if (last == null || version < last.getVersion()) {
+                // smaller than all in-memory versions
+                return bTree.openMapVersion(version, id, this);
+            }
+            Iterator<Page> it = oldRoots.iterator();
+            while (it.hasNext()) {
+                Page p = it.next();
+                if (p.getVersion() > version) {
+                    break;
+                }
+                last = p;
+            }
+            newest = last;
+        }
+        MVMap<K, V> m = openReadOnly();
+        m.root = newest;
+        return m;
+    }
+
 
 
 
