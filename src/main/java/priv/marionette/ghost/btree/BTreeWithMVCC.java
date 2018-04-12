@@ -949,6 +949,24 @@ public final class BTreeWithMVCC {
         }
     }
 
+    private void compactRewrite(ArrayList<Chunk> old) {
+        HashSet<Integer> set = new HashSet<>();
+        for (Chunk c : old) {
+            set.add(c.id);
+        }
+        for (MVMap<?, ?> m : maps.values()) {
+            @SuppressWarnings("unchecked")
+            MVMap<Object, Object> map = (MVMap<Object, Object>) m;
+            if (!map.rewrite(set)) {
+                return;
+            }
+        }
+        if (!meta.rewrite(set)) {
+            return;
+        }
+        freeUnusedChunks();
+        commitAndSave();
+    }
 
     private ArrayList<Chunk> compactGetOldChunks(int targetFillRate, int write) {
 
