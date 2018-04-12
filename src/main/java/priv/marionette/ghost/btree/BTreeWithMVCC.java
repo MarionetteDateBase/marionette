@@ -7,6 +7,7 @@ import priv.marionette.compress.Compressor;
 import priv.marionette.ghost.*;
 import priv.marionette.ghost.type.StringDataType;
 import priv.marionette.tools.DataUtils;
+import priv.marionette.tools.New;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -973,11 +974,18 @@ public final class BTreeWithMVCC {
             return null;
         }
 
+        if (maxLengthSum <= 0) {
+            //避免分母为0
+            maxLengthLiveSum =1;
+        }
 
+        int fillRate = (int) (100 * maxLengthLiveSum / maxLengthSum);
+        if (fillRate >= targetFillRate) {
+            return null;
+        }
 
-
-
-
+        //老年代
+        ArrayList<Chunk> old = New.arrayList();
 
     }
 
