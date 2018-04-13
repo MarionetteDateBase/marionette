@@ -1067,6 +1067,52 @@ public final class BTreeWithMVCC {
 
     }
 
+    /**
+     * 打开一个磁盘上的旧版本数据
+     * @param version
+     * @param mapId
+     * @param template
+     * @param <T>
+     * @return
+     */
+    @SuppressWarnings("unchecked")
+    <T extends MVMap<?, ?>> T openMapVersion(long version, int mapId,
+                                             MVMap<?, ?> template) {
+        MVMap<String, String> oldMeta = getMetaMap(version);
+        long rootPos = getRootPos(oldMeta, mapId);
+        MVMap<?, ?> m = template.openReadOnly();
+        m.setRootPos(rootPos, version);
+        return (T) m;
+    }
+
+    private static long getRootPos(MVMap<String, String> map, int mapId) {
+        String root = map.get(MVMap.getMapRootKey(mapId));
+        return root == null ? 0 : DataUtils.parseHexLong(root);
+    }
+
+    private MVMap<String, String> getMetaMap(long version) {
+        Chunk c = getChunkForVersion(version);
+        DataUtils.checkArgument(c != null, "Unknown version {0}", version);
+        c = readChunkHeader(c.block);
+        MVMap<String, String> oldMeta = meta.openReadOnly();
+        oldMeta.setRootPos(c.metaRootPos, version);
+        return oldMeta;
+    }
+
+    private Chunk getChunkForVersion(long version) {
+        Chunk newest = null;
+        for (Chunk c : chunks.values()) {
+            if (c.version <= version) {
+                if (newest == null || c.id > newest.id) {
+                    newest = c;
+                }
+            }
+        }
+        return newest;
+    }
+
+
+
 
 
     private static class BackgroundWriterThread extends Thread {

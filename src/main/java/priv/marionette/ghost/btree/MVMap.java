@@ -490,6 +490,18 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return m;
     }
 
+    MVMap<K, V> openReadOnly() {
+        MVMap<K, V> m = new MVMap<>(keyType, valueType);
+        m.readOnly = true;
+        HashMap<String, Object> config = new HashMap<>();
+        config.put("id", id);
+        config.put("createVersion", createVersion);
+        m.init(bTree, config);
+        m.root = root;
+        return m;
+    }
+
+
 
 
 
