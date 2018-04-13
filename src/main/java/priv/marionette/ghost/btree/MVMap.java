@@ -365,6 +365,9 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     }
 
 
+
+
+
     /**
      * 根据指定的key替换value
      * @param key
@@ -448,6 +451,61 @@ public class MVMap<K,V> extends AbstractMap<K, V>
             }
             throw e;
         }
+    }
+
+    private int rewrite(Page p, Set<Integer> set) {
+        if (p.isLeaf()) {
+            long pos = p.getPos();
+            int chunkId = DataUtils.getPageChunkId(pos);
+            if (!set.contains(chunkId)) {
+                return 0;
+            }
+            if (p.getKeyCount() > 0) {
+                @SuppressWarnings("unchecked")
+                K key = (K) p.getKey(0);
+                V value = get(key);
+                if (value != null) {
+                    replace(key, value, value);
+                }
+            }
+            return 1;
+        }
+        int writtenPageCount = 0;
+        for (int i = 0; i < getChildPageCount(p); i++) {
+            long childPos = p.getChildPagePos(i);
+            if (childPos != 0 && DataUtils.getPageType(childPos) == DataUtils.PAGE_TYPE_LEAF) {
+                //dfs到处于set指定chunkId的leaf page，rewrite
+                int chunkId = DataUtils.getPageChunkId(childPos);
+                if (!set.contains(chunkId)) {
+                    continue;
+                }
+            }
+            writtenPageCount += rewrite(p.getChildPage(i), set);
+        }
+        if (writtenPageCount == 0) {
+            long pos = p.getPos();
+            int chunkId = DataUtils.getPageChunkId(pos);
+            if (set.contains(chunkId)) {
+                // an inner node page that is in one of the chunks,
+                // but only points to chunks that are not in the set:
+                // if no child was changed, we need to do that now
+                // (this is not needed if anyway one of the children
+                // was changed, as this would have updated this
+                // page as well)
+                Page p2 = p;
+                while (!p2.isLeaf()) {
+                    p2 = p2.getChildPage(0);
+                }
+                @SuppressWarnings("unchecked")
+                K key = (K) p2.getKey(0);
+                V value = get(key);
+                if (value != null) {
+                    replace(key, value, value);
+                }
+                writtenPageCount++;
+            }
+        }
+        return writtenPageCount;
     }
 
 

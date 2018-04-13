@@ -521,6 +521,10 @@ public class Page {
         return children[index].count;
     }
 
+    public long getChildPagePos(int index) {
+        return children[index].pos;
+    }
+
     /**
      * 记录多少被当前page引用/间接引用的其他pages的信息，通过引用计数法判断chunks的使用率，
      * 从而进行垃圾回收
