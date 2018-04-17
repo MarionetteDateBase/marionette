@@ -770,12 +770,10 @@ public final class BTreeWithMVCC {
             // no chunk
             return;
         }
-        // read the chunk header and footer,
-        // and follow the chain of next chunks
+        // 通过header和footer来遍历chunk chain这个文件化的双向链表
         while (true) {
             if (newest.next == 0 ||
                     newest.next >= fileStore.size() / BLOCK_SIZE) {
-                // no (valid) next
                 break;
             }
             test = readChunkHeaderAndFooter(newest.next);
@@ -786,8 +784,7 @@ public final class BTreeWithMVCC {
         }
         setLastChunk(newest);
         loadChunkMeta();
-        // read all chunk headers and footers within the retention time,
-        // to detect unwritten data after a power failure
+        // 检查chunk的header和footer来去除由于断电等原因造成的错误写入版本
         verifyLastChunks();
         for (Chunk c : chunks.values()) {
             if (c.pageCountLive == 0) {
