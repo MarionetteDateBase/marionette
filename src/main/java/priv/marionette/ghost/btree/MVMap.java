@@ -560,7 +560,9 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     }
 
 
-
+    void close() {
+        closed = true;
+    }
 
 
     protected int getChildPageCount(Page p) {

@@ -348,6 +348,7 @@ public final class BTreeWithMVCC {
                 cacheChunkRef.clear();
             }
             for (MVMap<?, ?> m : new ArrayList<>(maps.values())) {
+                //is marked as closed
                 m.close();
             }
             chunks.clear();
@@ -357,6 +358,59 @@ public final class BTreeWithMVCC {
             }
         }
     }
+
+    /**
+     * 收缩文件长度
+     * @param minPercent
+     */
+    private void shrinkFileIfPossible(int minPercent) {
+        if (fileStore.isReadOnly()) {
+            return;
+        }
+        long end = getFileLengthInUse();
+        long fileSize = fileStore.size();
+        if (end >= fileSize) {
+            return;
+        }
+        if (minPercent > 0 && fileSize - end < BLOCK_SIZE) {
+            return;
+        }
+        int savedPercent = (int) (100 - (end * 100 / fileSize));
+        if (savedPercent < minPercent) {
+            return;
+        }
+        //如果文件流未关闭，将所有更改强制同步到磁盘
+        if (!closed) {
+            sync();
+        }
+        fileStore.truncate(end);
+    }
+
+    public void sync() {
+        checkOpen();
+        FileStore f = fileStore;
+        if (f != null) {
+            f.sync();
+        }
+    }
+
+    private long getFileLengthInUse() {
+        long result = fileStore.getFileLengthInUse();
+        assert result == _getFileLengthInUse() : result + " != " + _getFileLengthInUse();
+        return result;
+    }
+
+    private long _getFileLengthInUse() {
+        long size = 2;
+        for (Chunk c : chunks.values()) {
+            if (c.len != Integer.MAX_VALUE) {
+                size = Math.max(size, c.block + c.len);
+            }
+        }
+        return size * BLOCK_SIZE;
+    }
+
+
 
     private void stopBackgroundThread() {
         BackgroundWriterThread t = backgroundWriterThread;
@@ -698,14 +752,8 @@ public final class BTreeWithMVCC {
         // 按四年1461天计算
         int year =  1970 + (int) (now / (1000L * 60 * 60 * 6 * 1461));
         if (year < 2014) {
-            // if the year is before 2014,
-            // we assume the system doesn't have a real-time clock,
-            // and we set the creationTime to the past, so that
-            // existing chunks are overwritten
             creationTime = now - fileStore.getDefaultRetentionTime();
         } else if (now < creationTime) {
-            // the system time was set to the past:
-            // we change the creation time
             creationTime = now;
             storeHeader.put("created", creationTime);
         }
@@ -751,6 +799,59 @@ public final class BTreeWithMVCC {
         }
     }
 
+    private void verifyLastChunks() {
+        long time = getTimeSinceCreation();
+        ArrayList<Integer> ids = new ArrayList<>(chunks.keySet());
+        Collections.sort(ids);
+        int newestValidChunk = -1;
+        Chunk old = null;
+        for (Integer chunkId : ids) {
+            Chunk c = chunks.get(chunkId);
+            if (old != null && c.time < old.time) {
+                // old chunk (maybe leftover from a previous crash)
+                break;
+            }
+            old = c;
+            if (c.time + retentionTime < time) {
+                // old chunk, no need to verify
+                newestValidChunk = c.id;
+                continue;
+            }
+            Chunk test = readChunkHeaderAndFooter(c.block);
+            if (test == null || test.id != c.id) {
+                break;
+            }
+            newestValidChunk = chunkId;
+        }
+        Chunk newest = chunks.get(newestValidChunk);
+        if (newest != lastChunk) {
+            // to avoid re-using newer chunks later on, we could clear
+            // the headers and footers of those, but we might not know about all
+            // of them, so that could be incomplete - but we check that newer
+            // chunks are written after older chunks, so we are safe
+            rollbackTo(newest == null ? 0 : newest.version);
+        }
+    }
+
+    private void loadChunkMeta() {
+        // load the chunk metadata: we can load in any order,
+        // because loading chunk metadata might recursively load another chunk
+        for (Iterator<String> it = meta.keyIterator("chunk."); it.hasNext();) {
+            String s = it.next();
+            if (!s.startsWith("chunk.")) {
+                break;
+            }
+            s = meta.get(s);
+            Chunk c = Chunk.fromString(s);
+            if (chunks.putIfAbsent(c.id, c) == null) {
+                if (c.block == Long.MAX_VALUE) {
+                    throw DataUtils.newIllegalStateException(
+                            DataUtils.ERROR_FILE_CORRUPT,
+                            "Chunk {0} is invalid", c.id);
+                }
+            }
+        }
+    }
 
     private void setLastChunk(Chunk last) {
         lastChunk = last;
