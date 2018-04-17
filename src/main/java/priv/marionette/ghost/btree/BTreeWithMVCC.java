@@ -805,12 +805,10 @@ public final class BTreeWithMVCC {
         for (Integer chunkId : ids) {
             Chunk c = chunks.get(chunkId);
             if (old != null && c.time < old.time) {
-                // old chunk (maybe leftover from a previous crash)
                 break;
             }
             old = c;
             if (c.time + retentionTime < time) {
-                // old chunk, no need to verify
                 newestValidChunk = c.id;
                 continue;
             }
@@ -822,13 +820,112 @@ public final class BTreeWithMVCC {
         }
         Chunk newest = chunks.get(newestValidChunk);
         if (newest != lastChunk) {
-            // to avoid re-using newer chunks later on, we could clear
-            // the headers and footers of those, but we might not know about all
-            // of them, so that could be incomplete - but we check that newer
-            // chunks are written after older chunks, so we are safe
+            //回滚至正确的情况下最新的数据版本
             rollbackTo(newest == null ? 0 : newest.version);
         }
     }
+
+    /**
+     * 回归至某一版本。回滚后，所有目标版本之后的更改全部废弃。所有之后创建的版本控制Map全部关闭，
+     * 回滚至0意味者删除此Chunk相关的所有数据
+     * @param version
+     */
+    public synchronized void rollbackTo(long version) {
+        checkOpen();
+        if (version == 0) {
+            // special case: remove all data
+            for (MVMap<?, ?> m : maps.values()) {
+                m.close();
+            }
+            meta.clear();
+            chunks.clear();
+            if (fileStore != null) {
+                fileStore.clear();
+            }
+            maps.clear();
+            freedPageSpace.clear();
+            currentVersion = version;
+            setWriteVersion(version);
+            metaChanged = false;
+            return;
+        }
+        DataUtils.checkArgument(
+                isKnownVersion(version),
+                "Unknown version {0}", version);
+        for (MVMap<?, ?> m : maps.values()) {
+            m.rollbackTo(version);
+        }
+        for (long v = currentVersion; v >= version; v--) {
+            if (freedPageSpace.size() == 0) {
+                break;
+            }
+            freedPageSpace.remove(v);
+        }
+        meta.rollbackTo(version);
+        metaChanged = false;
+        boolean loadFromFile = false;
+        // find out which chunks to remove,
+        // and which is the newest chunk to keep
+        // (the chunk list can have gaps)
+        ArrayList<Integer> remove = new ArrayList<>();
+        Chunk keep = null;
+        for (Chunk c : chunks.values()) {
+            if (c.version > version) {
+                remove.add(c.id);
+            } else if (keep == null || keep.id < c.id) {
+                keep = c;
+            }
+        }
+        if (!remove.isEmpty()) {
+            // remove the youngest first, so we don't create gaps
+            // (in case we remove many chunks)
+            Collections.sort(remove, Collections.reverseOrder());
+            revertTemp(version);
+            loadFromFile = true;
+            for (int id : remove) {
+                Chunk c = chunks.remove(id);
+                long start = c.block * BLOCK_SIZE;
+                int length = c.len * BLOCK_SIZE;
+                fileStore.free(start, length);
+                // overwrite the chunk,
+                // so it is not be used later on
+                WriteBuffer buff = getWriteBuffer();
+                buff.limit(length);
+                // buff.clear() does not set the data
+                Arrays.fill(buff.getBuffer().array(), (byte) 0);
+                write(start, buff.getBuffer());
+                releaseWriteBuffer(buff);
+                // only really needed if we remove many chunks, when writes are
+                // re-ordered - but we do it always, because rollback is not
+                // performance critical
+                sync();
+            }
+            lastChunk = keep;
+            writeStoreHeader();
+            readStoreHeader();
+        }
+        for (MVMap<?, ?> m : new ArrayList<>(maps.values())) {
+            int id = m.getId();
+            if (m.getCreateVersion() >= version) {
+                m.close();
+                maps.remove(id);
+            } else {
+                if (loadFromFile) {
+                    m.setRootPos(getRootPos(meta, id), -1);
+                }
+            }
+        }
+        // rollback might have rolled back the stored chunk metadata as well
+        if (lastChunk != null) {
+            for (Chunk c : chunks.values()) {
+                meta.put(Chunk.getMetaKey(c.id), c.asString());
+            }
+        }
+        currentVersion = version;
+        setWriteVersion(version);
+    }
+
+
 
     private void loadChunkMeta() {
         // load the chunk metadata: we can load in any order,
