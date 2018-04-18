@@ -256,6 +256,35 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         };
     }
 
+    public Iterator<K> keyIterator(K from) {
+        return new Cursor<K, V>(this, root, from);
+    }
+
+
+    /**
+     * 回滚至某一版本
+     * @param version
+     */
+    void rollbackTo(long version) {
+        beforeWrite();
+        if (version <= createVersion) {
+            // the map is removed later
+        } else if (root.getVersion() >= version) {
+            while (true) {
+                Page last = oldRoots.peekLast();
+                if (last == null) {
+                    break;
+                }
+                // slow, but rollback is not a common operation
+                oldRoots.removeLast(last);
+                root = last;
+                if (root.getVersion() < version) {
+                    break;
+                }
+            }
+        }
+    }
+
 
     public K getKey(long index) {
         if (index < 0 || index >= size()) {

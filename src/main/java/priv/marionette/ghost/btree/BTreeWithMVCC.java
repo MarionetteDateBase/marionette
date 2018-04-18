@@ -833,7 +833,6 @@ public final class BTreeWithMVCC {
     public synchronized void rollbackTo(long version) {
         checkOpen();
         if (version == 0) {
-            // special case: remove all data
             for (MVMap<?, ?> m : maps.values()) {
                 m.close();
             }
@@ -928,8 +927,6 @@ public final class BTreeWithMVCC {
 
 
     private void loadChunkMeta() {
-        // load the chunk metadata: we can load in any order,
-        // because loading chunk metadata might recursively load another chunk
         for (Iterator<String> it = meta.keyIterator("chunk."); it.hasNext();) {
             String s = it.next();
             if (!s.startsWith("chunk.")) {
@@ -946,6 +943,46 @@ public final class BTreeWithMVCC {
             }
         }
     }
+
+    private boolean isKnownVersion(long version) {
+        if (version > currentVersion || version < 0) {
+            return false;
+        }
+        if (version == currentVersion || chunks.size() == 0) {
+            return true;
+        }
+        Chunk c = getChunkForVersion(version);
+        if (c == null) {
+            return false;
+        }
+        MVMap<String, String> oldMeta = getMetaMap(version);
+        if (oldMeta == null) {
+            return false;
+        }
+        try {
+            for (Iterator<String> it = oldMeta.keyIterator("chunk.");
+                 it.hasNext();) {
+                String chunkKey = it.next();
+                if (!chunkKey.startsWith("chunk.")) {
+                    break;
+                }
+                if (!meta.containsKey(chunkKey)) {
+                    String s = oldMeta.get(chunkKey);
+                    Chunk c2 = Chunk.fromString(s);
+                    Chunk test = readChunkHeaderAndFooter(c2.block);
+                    if (test == null || test.id != c2.id) {
+                        return false;
+                    }
+                    chunks.put(c2.id, c2);
+                }
+            }
+        } catch (IllegalStateException e) {
+            return false;
+        }
+        return true;
+    }
+
+
 
     private void setLastChunk(Chunk last) {
         lastChunk = last;
