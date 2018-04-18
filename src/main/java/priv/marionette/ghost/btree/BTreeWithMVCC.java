@@ -863,9 +863,7 @@ public final class BTreeWithMVCC {
         meta.rollbackTo(version);
         metaChanged = false;
         boolean loadFromFile = false;
-        // find out which chunks to remove,
-        // and which is the newest chunk to keep
-        // (the chunk list can have gaps)
+        // 查找哪些chunk需要被删除
         ArrayList<Integer> remove = new ArrayList<>();
         Chunk keep = null;
         for (Chunk c : chunks.values()) {
@@ -876,9 +874,9 @@ public final class BTreeWithMVCC {
             }
         }
         if (!remove.isEmpty()) {
-            // remove the youngest first, so we don't create gaps
-            // (in case we remove many chunks)
+            // 最年轻的版本最先释放
             Collections.sort(remove, Collections.reverseOrder());
+            //垃圾回收器中去除废弃版本的chunk
             revertTemp(version);
             loadFromFile = true;
             for (int id : remove) {
@@ -886,8 +884,7 @@ public final class BTreeWithMVCC {
                 long start = c.block * BLOCK_SIZE;
                 int length = c.len * BLOCK_SIZE;
                 fileStore.free(start, length);
-                // overwrite the chunk,
-                // so it is not be used later on
+                // 重写磁盘指定区域
                 WriteBuffer buff = getWriteBuffer();
                 buff.limit(length);
                 // buff.clear() does not set the data
@@ -924,6 +921,20 @@ public final class BTreeWithMVCC {
         setWriteVersion(version);
     }
 
+
+    private void revertTemp(long storeVersion) {
+        for (Iterator<Map.Entry<Long, ConcurrentHashMap<Integer, Chunk>>> it =
+             freedPageSpace.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<Long, ConcurrentHashMap<Integer, Chunk>> entry = it.next();
+            Long v = entry.getKey();
+            if (v <= storeVersion) {
+                it.remove();
+            }
+        }
+        for (MVMap<?, ?> m : maps.values()) {
+            m.removeUnusedOldVersions();
+        }
+    }
 
 
     private void loadChunkMeta() {

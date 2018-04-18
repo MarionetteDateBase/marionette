@@ -268,14 +268,12 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     void rollbackTo(long version) {
         beforeWrite();
         if (version <= createVersion) {
-            // the map is removed later
         } else if (root.getVersion() >= version) {
             while (true) {
                 Page last = oldRoots.peekLast();
                 if (last == null) {
                     break;
                 }
-                // slow, but rollback is not a common operation
                 oldRoots.removeLast(last);
                 root = last;
                 if (root.getVersion() < version) {
