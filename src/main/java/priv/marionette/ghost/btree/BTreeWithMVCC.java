@@ -922,6 +922,21 @@ public final class BTreeWithMVCC {
     }
 
 
+    /**
+     * 获取WriteBuffer，调用此方法的caller必须在store时加同步锁
+     * @return
+     */
+    private WriteBuffer getWriteBuffer() {
+        WriteBuffer buff;
+        if (writeBuffer != null) {
+            buff = writeBuffer;
+            buff.clear();
+        } else {
+            buff = new WriteBuffer();
+        }
+        return buff;
+    }
+
     private void revertTemp(long storeVersion) {
         for (Iterator<Map.Entry<Long, ConcurrentHashMap<Integer, Chunk>>> it =
              freedPageSpace.entrySet().iterator(); it.hasNext(); ) {
