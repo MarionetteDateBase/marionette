@@ -887,7 +887,7 @@ public final class BTreeWithMVCC {
                 // 重写磁盘指定区域
                 WriteBuffer buff = getWriteBuffer();
                 buff.limit(length);
-                // buff.clear() does not set the data
+                //重置数据
                 Arrays.fill(buff.getBuffer().array(), (byte) 0);
                 write(start, buff.getBuffer());
                 releaseWriteBuffer(buff);
@@ -919,6 +919,12 @@ public final class BTreeWithMVCC {
         }
         currentVersion = version;
         setWriteVersion(version);
+    }
+
+    private void releaseWriteBuffer(WriteBuffer buff) {
+        if (buff.capacity() <= 4 * 1024 * 1024) {
+            writeBuffer = buff;
+        }
     }
 
 
