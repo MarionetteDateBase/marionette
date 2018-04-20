@@ -533,13 +533,27 @@ public class Page {
 
         public static final long[] EMPTY_ARRAY = new long[0];
 
+        /**
+         * page的position
+         */
         final long pos;
 
+        /**
+         * 当前page的直接或间接的子节点
+         */
         long[] children;
 
         boolean chunkList;
 
+        private PageChildren(long pos, long[] children) {
+            this.pos = pos;
+            this.children = children;
+        }
 
+
+        int getMemory() {
+            return 64 + 8 * children.length;
+        }
 
     }
 
