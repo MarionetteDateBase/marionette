@@ -591,6 +591,9 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         closed = true;
     }
 
+    public long getCreateVersion() {
+        return createVersion;
+    }
 
     protected int getChildPageCount(Page p) {
         return p.getRawChildPageCount();

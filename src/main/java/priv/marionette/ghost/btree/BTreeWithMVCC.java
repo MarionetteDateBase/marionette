@@ -574,6 +574,26 @@ public final class BTreeWithMVCC {
         }
     }
 
+    private void markMetaChanged() {
+        metaChanged = true;
+    }
+
+    private boolean canOverwriteChunk(Chunk c, long time) {
+        if (retentionTime >= 0) {
+            if (c.time + retentionTime > time) {
+                return false;
+            }
+            if (c.unused == 0 || c.unused + retentionTime / 2 > time) {
+                return false;
+            }
+        }
+        Chunk r = retainChunk;
+        if (r != null && c.version > r.version) {
+            return false;
+        }
+        return true;
+    }
+
     private Set<Integer> collectReferencedChunks() {
         long testVersion = lastChunk.version;
         DataUtils.checkArgument(testVersion > 0, "Collect references on version 0");
@@ -891,9 +911,6 @@ public final class BTreeWithMVCC {
                 Arrays.fill(buff.getBuffer().array(), (byte) 0);
                 write(start, buff.getBuffer());
                 releaseWriteBuffer(buff);
-                // only really needed if we remove many chunks, when writes are
-                // re-ordered - but we do it always, because rollback is not
-                // performance critical
                 sync();
             }
             lastChunk = keep;
