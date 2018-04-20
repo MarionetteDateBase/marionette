@@ -545,6 +545,10 @@ public final class BTreeWithMVCC {
             freeUnusedChunks();
             lastFreeUnusedChunks = getTimeSinceCreation();
         }
+        int currentUnsavedPageCount = unsavedMemory;
+        long storeVersion = currentStoreVersion;
+        long version = ++currentVersion;
+
     }
 
     private synchronized void freeUnusedChunks() {
