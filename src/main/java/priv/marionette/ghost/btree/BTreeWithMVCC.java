@@ -633,7 +633,6 @@ public final class BTreeWithMVCC {
                 long p = refs.children[i];
                 collectReferencedChunks(target, mapId, p, level + 1);
             }
-            // we don't need a reference to this chunk
             target.remove(c);
             long[] children = new long[target.size()];
             int i = 0;

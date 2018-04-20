@@ -531,6 +531,16 @@ public class Page {
      */
     public static  class PageChildren{
 
+        public static final long[] EMPTY_ARRAY = new long[0];
+
+        final long pos;
+
+        long[] children;
+
+        boolean chunkList;
+
+
+
     }
 
 }
