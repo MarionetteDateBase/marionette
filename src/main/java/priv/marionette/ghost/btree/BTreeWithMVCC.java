@@ -625,7 +625,7 @@ public final class BTreeWithMVCC {
         if (DataUtils.getPageType(pos) == DataUtils.PAGE_TYPE_LEAF) {
             return;
         }
-        Page.PageChildren refs = readPageChunkReferences(mapId, pos, -1);
+        PageChildren refs = readPageChunkReferences(mapId, pos, -1);
         if (!refs.chunkList) {
             Set<Integer> target = new HashSet<>();
             for (int i = 0; i < refs.children.length; i++) {
@@ -649,6 +649,51 @@ public final class BTreeWithMVCC {
         for (long p : refs.children) {
             targetChunkSet.add(DataUtils.getPageChunkId(p));
         }
+    }
+
+    private PageChildren readPageChunkReferences(int mapId, long pos, int parentChunk) {
+        if (DataUtils.getPageType(pos) == DataUtils.PAGE_TYPE_LEAF) {
+            return null;
+        }
+        PageChildren r;
+        if (cacheChunkRef != null) {
+            r = cacheChunkRef.get(pos);
+        } else {
+            r = null;
+        }
+        if (r == null) {
+            // if possible, create it from the cached page
+            if (cache != null) {
+                Page p = cache.get(pos);
+                if (p != null) {
+                    r = new PageChildren(p);
+                }
+            }
+            if (r == null) {
+                // page was not cached: read the data
+                Chunk c = getChunk(pos);
+                long filePos = c.block * BLOCK_SIZE;
+                filePos += DataUtils.getPageOffset(pos);
+                if (filePos < 0) {
+                    throw DataUtils.newIllegalStateException(
+                            DataUtils.ERROR_FILE_CORRUPT,
+                            "Negative position {0}; p={1}, c={2}", filePos, pos, c.toString());
+                }
+                long maxPos = (c.block + c.len) * BLOCK_SIZE;
+                r = PageChildren.read(fileStore, pos, mapId, filePos, maxPos);
+            }
+            r.removeDuplicateChunkReferences();
+            if (cacheChunkRef != null) {
+                cacheChunkRef.put(pos, r, r.getMemory());
+            }
+        }
+        if (r.children.length == 0) {
+            int chunk = DataUtils.getPageChunkId(pos);
+            if (chunk == parentChunk) {
+                return null;
+            }
+        }
+        return r;
     }
 
     void removePage(MVMap<?, ?> map, long pos, int memory) {
