@@ -586,6 +586,9 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return m;
     }
 
+    public Cursor<K, V> cursor(K from) {
+        return new Cursor<>(this, root, from);
+    }
 
     void close() {
         closed = true;

@@ -618,6 +618,39 @@ public final class BTreeWithMVCC {
     }
 
 
+    private void collectReferencedChunks(Set<Integer> targetChunkSet,
+                                         int mapId, long pos, int level) {
+        int c = DataUtils.getPageChunkId(pos);
+        targetChunkSet.add(c);
+        if (DataUtils.getPageType(pos) == DataUtils.PAGE_TYPE_LEAF) {
+            return;
+        }
+        Page.PageChildren refs = readPageChunkReferences(mapId, pos, -1);
+        if (!refs.chunkList) {
+            Set<Integer> target = new HashSet<>();
+            for (int i = 0; i < refs.children.length; i++) {
+                long p = refs.children[i];
+                collectReferencedChunks(target, mapId, p, level + 1);
+            }
+            // we don't need a reference to this chunk
+            target.remove(c);
+            long[] children = new long[target.size()];
+            int i = 0;
+            for (Integer p : target) {
+                children[i++] = DataUtils.getPagePos(p, 0, 0,
+                        DataUtils.PAGE_TYPE_LEAF);
+            }
+            refs.children = children;
+            refs.chunkList = true;
+            if (cacheChunkRef != null) {
+                cacheChunkRef.put(refs.pos, refs, refs.getMemory());
+            }
+        }
+        for (long p : refs.children) {
+            targetChunkSet.add(DataUtils.getPageChunkId(p));
+        }
+    }
+
     void removePage(MVMap<?, ?> map, long pos, int memory) {
         // 如果这个page还没有被持久化，那么作为旧版本临时保存
         if (pos == 0) {
