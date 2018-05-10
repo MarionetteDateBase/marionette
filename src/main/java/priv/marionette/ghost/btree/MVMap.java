@@ -513,12 +513,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
             long pos = p.getPos();
             int chunkId = DataUtils.getPageChunkId(pos);
             if (set.contains(chunkId)) {
-                // an inner node page that is in one of the chunks,
-                // but only points to chunks that are not in the set:
-                // if no child was changed, we need to do that now
-                // (this is not needed if anyway one of the children
-                // was changed, as this would have updated this
-                // page as well)
+                // 如果某个内部节点的指针指向set中的某个chunk，那么找到它的一个叶子节点重写来更新整个chunk
                 Page p2 = p;
                 while (!p2.isLeaf()) {
                     p2 = p2.getChildPage(0);
