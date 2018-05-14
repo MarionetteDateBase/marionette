@@ -25,7 +25,7 @@ import java.nio.ByteBuffer;
  * @author Yue Yu
  * @create 2018-03-13 下午4:35
  **/
-public class Page {
+public abstract class Page implements Cloneable{
 
     /**
      * 空节点拥有同一指针

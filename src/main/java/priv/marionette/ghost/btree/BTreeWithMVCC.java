@@ -666,7 +666,7 @@ public final class BTreeWithMVCC {
             r = null;
         }
         if (r == null) {
-            // if possible, create it from the cached page
+            // 先从缓存中读取page
             if (cache != null) {
                 Page p = cache.get(pos);
                 if (p != null) {
@@ -674,7 +674,7 @@ public final class BTreeWithMVCC {
                 }
             }
             if (r == null) {
-                // page was not cached: read the data
+                // 没有，通过position从磁盘读取
                 Chunk c = getChunk(pos);
                 long filePos = c.block * BLOCK_SIZE;
                 filePos += DataUtils.getPageOffset(pos);
