@@ -5,6 +5,10 @@ import priv.marionette.ghost.type.DataType;
 import priv.marionette.tools.DataUtils;
 
 import java.nio.ByteBuffer;
+import static priv.marionette.engine.Constants.MEMORY_ARRAY;
+import static priv.marionette.engine.Constants.MEMORY_OBJECT;
+import static priv.marionette.engine.Constants.MEMORY_POINTER;
+import static priv.marionette.tools.DataUtils.PAGE_TYPE_LEAF;
 
 /**
  * B树的节点
@@ -27,20 +31,10 @@ import java.nio.ByteBuffer;
  **/
 public abstract class Page implements Cloneable{
 
-    /**
-     * 空节点拥有同一指针
-     */
-    public static final Object[] EMPTY_OBJECT_ARRAY = new Object[0];
-
-    private static final int IN_MEMORY = 0x80000000;
 
     private final MVMap<?, ?> map;
 
-    private long version;
-
     private long pos;
-
-    private long totalCount;
 
     private int cachedCompare;
 
@@ -54,47 +48,68 @@ public abstract class Page implements Cloneable{
 
     private volatile boolean removedInMemory;
 
+    /**
+     *    每一个子节点的引用至少占用的内存
+     */
+    static final int PAGE_MEMORY_CHILD = MEMORY_POINTER + 16;
 
-    Page(MVMap<?, ?> map, long version) {
+    /**
+     *  每一个基础page所至少要占用的内存
+     */
+    private static final int PAGE_MEMORY =
+            MEMORY_OBJECT +           // this
+            2 * MEMORY_POINTER +      // map, keys
+            MEMORY_ARRAY +            // Object[] keys
+            17;                       // pos, cachedCompare, memory, removedInMemory
+
+    /**
+     * 每一个内部节点所至少要占用的内存
+     */
+    static final int PAGE_NODE_MEMORY =
+            PAGE_MEMORY +             // super
+            MEMORY_POINTER +          // children
+            MEMORY_ARRAY +            // Object[] children
+            8;                        // totalCount
+
+
+    /**
+     *  每一个叶子节点所至少要占用的内存
+     */
+    static final int PAGE_LEAF_MEMORY =
+            PAGE_MEMORY +             // super
+            MEMORY_POINTER +          // values
+            MEMORY_ARRAY;             // Object[] values
+
+
+    private static final Object[] EMPTY_OBJECT_ARRAY = new Object[0];
+
+    private static final int IN_MEMORY = 0x80000000;
+
+    private static final PageReference[] SINGLE_EMPTY = { PageReference.EMPTY };
+
+
+    Page(MVMap<?, ?> map) {
         this.map = map;
-        this.version = version;
     }
 
-    static Page createEmpty(MVMap<?, ?> map, long version) {
-        return create(map, version,
-                EMPTY_OBJECT_ARRAY, EMPTY_OBJECT_ARRAY,
-                null,
-                0, DataUtils.PAGE_MEMORY);
+    Page(MVMap<?, ?> map, Page source) {
+        this(map, source.keys);
+        memory = source.memory;
     }
 
-    public static Page create(MVMap<?, ?> map, long version,
-                              Object[] keys, Object[] values, PageReference[] children,
-                              long totalCount, int memory) {
-        Page p = new Page(map, version);
-        // the position is 0
-        p.keys = keys;
-        p.values = values;
-        p.children = children;
-        p.totalCount = totalCount;
-        BTreeWithMVCC bTree = map.bTree;
-        if(bTree.getFileStore() == null) {
-            p.memory = IN_MEMORY;
-        } else if (memory == 0) {
-            p.recalculateMemory();
-        } else {
-            p.addMemory(memory);
-        }
-        if(bTree.getFileStore() != null) {
-            bTree.registerUnsavedPage(p.memory);
-        }
-        return p;
+    Page(MVMap<?, ?> map, Object keys[]) {
+        this.map = map;
+        this.keys = keys;
     }
+
 
     private void addMemory(int mem) {
         memory += mem;
     }
 
     public static class PageReference {
+
+        public static final PageReference EMPTY = new PageReference(null, 0, 0);
 
         /**
          * The position, if known, or 0.
