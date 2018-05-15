@@ -9,12 +9,16 @@ import priv.marionette.ghost.*;
 import priv.marionette.ghost.type.StringDataType;
 import priv.marionette.tools.DataUtils;
 import priv.marionette.tools.New;
-import priv.marionette.ghost.btree.Page.PageChildren;
+import static priv.marionette.ghost.btree.MVMap.INITIAL_VERSION;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+
 
 /**
  * 以B树为单位，以MVCC作为并发控制的<K,V>式数据存储
@@ -23,8 +27,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * @create 2018-03-13 下午4:06
  **/
 public final class BTreeWithMVCC {
-
-    public static final boolean ASSERT = false;
 
     /**
      * 区块大小，一个Chunk的有两个header，第二个是第一个header的备份
@@ -38,7 +40,7 @@ public final class BTreeWithMVCC {
     /**
      * 强制垃圾回收
      */
-    private static final int MARKED_FREE = 10000000;
+    private static final int MARKED_FREE = 10_000_000;
 
     /**
      * 持续持久化内存数据更改的master线程，类似于mongodb的fork后台子进程
@@ -49,11 +51,12 @@ public final class BTreeWithMVCC {
 
     private volatile boolean closed;
 
-    private final FileStore fileStore;
-
+    final FileStore fileStore;
     private final boolean fileStoreIsProvided;
 
     private final int pageSplitSize;
+
+    private final int keysPerPage;
 
     /**
      * 页面置换缓存
@@ -67,6 +70,9 @@ public final class BTreeWithMVCC {
 
     private final ConcurrentHashMap<Integer, Chunk> chunks =
             new ConcurrentHashMap<>();
+
+    private long updateCounter = 0;
+    private long updateAttemptCounter = 0;
 
     private final ConcurrentHashMap<Long,
             ConcurrentHashMap<Integer, Chunk>> freedPageSpace =
@@ -95,30 +101,69 @@ public final class BTreeWithMVCC {
 
     private volatile long currentVersion;
 
-    private long lastStoredVersion;
+    /**
+     * The version of the last stored chunk, or -1 if nothing was stored so far.
+     */
+    private long lastStoredVersion = INITIAL_VERSION;
 
+    /**
+     * Oldest store version in use. All version beyond this can be safely dropped
+     */
+    private final AtomicLong oldestVersionToKeep = new AtomicLong();
+
+    /**
+     * Collection of all versions used by currently open transactions.
+     */
+    private final Deque<TxCounter> versions = new LinkedList<>();
+
+    /**
+     * Counter of open transactions for the latest (current) store version
+     */
+    private volatile TxCounter currentTxCounter = new TxCounter(currentVersion);
+
+    /**
+     * The estimated memory used by unsaved pages. This number is not accurate,
+     * also because it may be changed concurrently, and because temporary pages
+     * are counted.
+     */
     private int unsavedMemory;
     private final int autoCommitMemory;
-    private boolean saveNeeded;
+    private volatile boolean saveNeeded;
 
+    /**
+     * The time the store was created, in milliseconds since 1970.
+     */
     private long creationTime;
 
+    /**
+     * How long to retain old, persisted chunks, in milliseconds. For larger or
+     * equal to zero, a chunk is never directly overwritten if unused, but
+     * instead, the unused field is set. If smaller zero, chunks are directly
+     * overwritten if unused.
+     */
     private int retentionTime;
 
     private long lastCommitTime;
 
-    private Chunk retainChunk;
-
+    /**
+     * The version of the current store operation (if any).
+     */
     private volatile long currentStoreVersion = -1;
 
-    private Thread currentStoreThread;
+    /**
+     * Holds reference to a thread performing store operation (if any)
+     * or null if there is none is in progress.
+     */
+    private final AtomicReference<Thread> currentStoreThread = new AtomicReference<>();
 
     private volatile boolean metaChanged;
 
+    /**
+     * The delay in milliseconds to automatically commit and write changes.
+     */
     private int autoCommitDelay;
 
     private final int autoCompactFillRate;
-
     private long autoCompactLastFileOpCount;
 
     private final Object compactSync = new Object();
@@ -128,6 +173,7 @@ public final class BTreeWithMVCC {
     private long lastTimeAbsolute;
 
     private long lastFreeUnusedChunks;
+
 
 
     BTreeWithMVCC(Map<String, Object> config){
@@ -1598,6 +1644,19 @@ public final class BTreeWithMVCC {
     }
 
 
+    public static final class TxCounter {
+        public final long version;
+        public final AtomicInteger counter = new AtomicInteger();
+
+        TxCounter(long version) {
+            this.version = version;
+        }
+
+        @Override
+        public String toString() {
+            return "v=" + version + " / cnt=" + counter;
+        }
+    }
 
 
     private static class BackgroundWriterThread extends Thread {

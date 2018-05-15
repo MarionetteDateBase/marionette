@@ -43,6 +43,8 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     private final DataType keyType;
     private final DataType valueType;
 
+    static final long INITIAL_VERSION = -1;
+
     private final ConcurrentArrayList<Page> oldRoots =
             new ConcurrentArrayList<>();
 
