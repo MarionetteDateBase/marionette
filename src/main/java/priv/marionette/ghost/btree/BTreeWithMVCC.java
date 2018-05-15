@@ -1210,12 +1210,11 @@ public final class BTreeWithMVCC {
     }
 
 
-    void cachePage(long pos, Page page, int memory) {
+    void cachePage(Page page) {
         if (cache != null) {
-            cache.put(pos, page, memory);
+            cache.put(page.getPos(), page, page.getMemory());
         }
     }
-
 
 
     long getOldestVersionToKeep() {
@@ -1472,6 +1471,9 @@ public final class BTreeWithMVCC {
         return newest;
     }
 
+    int getCompressionLevel() {
+        return compressionLevel;
+    }
 
 
     final class ChunkIdsCollector {

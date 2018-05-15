@@ -129,6 +129,27 @@ public abstract class Page implements Cloneable{
         return page;
     }
 
+
+    /**
+     * create a new page
+     * @param map
+     * @param keys
+     * @param values
+     * @param children
+     * @param totalCount
+     * @param memory
+     * @return
+     */
+    public static Page create(MVMap<?, ?> map,
+                              Object[] keys, Object[] values, PageReference[] children,
+                              long totalCount, int memory) {
+        assert keys != null;
+        Page p = children == null ? new Leaf(map, keys, values) :
+                new NonLeaf(map, keys, children, totalCount);
+        p.initMemoryAccount(memory);
+        return p;
+    }
+
     private void initMemoryAccount(int memoryCount) {
         if(map.bTree.getFileStore() == null) {
             memory = IN_MEMORY;
@@ -155,6 +176,19 @@ public abstract class Page implements Cloneable{
             }
             p = p.getChildPage(index);
         }
+    }
+
+    /**
+     * 计算节点key array所占用的内存
+     * @return
+     */
+    protected int calculateMemory() {
+        int mem = keys.length * MEMORY_POINTER;
+        DataType keyType = map.getKeyType();
+        for (Object key : keys) {
+            mem += keyType.getMemory(key);
+        }
+        return mem;
     }
 
     private void recalculateMemory() {
@@ -413,7 +447,7 @@ public abstract class Page implements Cloneable{
         int compressStart = buff.position();
         map.getKeyType().write(buff, keys, getKeyCount(), true);
         writeValues(buff);
-        BTreeWithMVCC bTree = map.getStore();
+        BTreeWithMVCC bTree = map.getBTree();
         int expLen = buff.position() - compressStart;
         if (expLen > 16) {
             int compressionLevel = bTree.getCompressionLevel();
@@ -421,10 +455,10 @@ public abstract class Page implements Cloneable{
                 Compressor compressor;
                 int compressType;
                 if (compressionLevel == 1) {
-                    compressor = map.getStore().getCompressorFast();
+                    compressor = map.getBTree().getCompressorFast();
                     compressType = DataUtils.PAGE_COMPRESSED;
                 } else {
-                    compressor = map.getStore().getCompressorHigh();
+                    compressor = map.getBTree().getCompressorHigh();
                     compressType = DataUtils.PAGE_COMPRESSED_HIGH;
                 }
                 byte[] exp = new byte[expLen];
@@ -453,7 +487,7 @@ public abstract class Page implements Cloneable{
                     DataUtils.ERROR_INTERNAL, "Page already stored");
         }
         pos = DataUtils.getPagePos(chunkId, start, pageLength, type);
-        btree.cachePage(this);
+        bTree.cachePage(this);
         if (type == DataUtils.PAGE_TYPE_NODE) {
             // cache again - this will make sure nodes stays in the cache
             // for a longer time
@@ -504,6 +538,32 @@ public abstract class Page implements Cloneable{
 
 
     abstract Page split(int at);
+
+    /**
+     * 分裂节点key array
+     * @param aCount
+     * @param bCount
+     * @return
+     */
+    final Object[] splitKeys(int aCount, int bCount) {
+        assert aCount + bCount <= getKeyCount();
+        Object aKeys[] = createKeyStorage(aCount);
+        Object bKeys[] = createKeyStorage(bCount);
+        System.arraycopy(keys, 0, aKeys, 0, aCount);
+        System.arraycopy(keys, getKeyCount() - bCount, bKeys, 0, bCount);
+        keys = aKeys;
+        return bKeys;
+    }
+
+    private Object[] createKeyStorage(int size)
+    {
+        return new Object[size];
+    }
+
+    final Object[] createValueStorage(int size)
+    {
+        return new Object[size];
+    }
 
 
     /**
@@ -582,6 +642,20 @@ public abstract class Page implements Cloneable{
      */
     public abstract Page getChildPage(int index);
 
+    final void insertKey(int index, Object key) {
+        int keyCount = getKeyCount();
+        assert index <= keyCount : index + " > " + keyCount;
+        Object[] newKeys = new Object[keyCount + 1];
+        DataUtils.copyWithGap(keys, newKeys, keyCount, index);
+        keys = newKeys;
+
+        keys[index] = key;
+
+        if (isPersistent()) {
+            addMemory(MEMORY_POINTER + map.getKeyType().getMemory(key));
+        }
+    }
+
     long getCounts(int index) {
         return children[index].count;
     }
@@ -599,6 +673,11 @@ public abstract class Page implements Cloneable{
     public final boolean isSaved() {
         return DataUtils.isPageSaved(pos);
     }
+
+    protected abstract void writeValues(WriteBuffer buff);
+
+    protected abstract void writeChildren(WriteBuffer buff, boolean withCounts);
+
 
     @Override
     public String toString() {
