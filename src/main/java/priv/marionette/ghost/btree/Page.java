@@ -228,6 +228,20 @@ public abstract class Page implements Cloneable{
         return keys.length;
     }
 
+    public void remove(int index) {
+        int keyCount = getKeyCount();
+        DataType keyType = map.getKeyType();
+        if (index == keyCount) {
+            --index;
+        }
+        if(isPersistent()) {
+            Object old = getKey(index);
+            addMemory(-MEMORY_POINTER - keyType.getMemory(old));
+        }
+        Object newKeys[] = new Object[keyCount - 1];
+        DataUtils.copyExcept(keys, newKeys, keyCount, index);
+        keys = newKeys;
+    }
 
     public int getRawChildPageCount() {
         return children.length;
@@ -507,6 +521,8 @@ public abstract class Page implements Cloneable{
         return typePos + 1;
     }
 
+    abstract void writeUnsavedRecursive(Chunk chunk, WriteBuffer buff);
+
     public abstract Page getChildPageIfLoaded(int index);
 
     /**
@@ -674,9 +690,13 @@ public abstract class Page implements Cloneable{
         return DataUtils.isPageSaved(pos);
     }
 
+    abstract void writeEnd();
+
     protected abstract void writeValues(WriteBuffer buff);
 
     protected abstract void writeChildren(WriteBuffer buff, boolean withCounts);
+
+    public abstract void removeAllRecursive();
 
 
     @Override
@@ -758,7 +778,7 @@ public abstract class Page implements Cloneable{
                 System.arraycopy(values, at, bValues, 0, b);
                 values = aValues;
             }
-            Page newPage = create(map, bKeys, bValues, null, b, 0);
+            Page newPage = create(super.map, bKeys, bValues, null, b, 0);
             if(isPersistent()) {
                 recalculateMemory();
             }
@@ -1182,31 +1202,37 @@ public abstract class Page implements Cloneable{
     }
 
 
-    public static class PageReference {
+    public static final class PageReference {
 
         public static final PageReference EMPTY = new PageReference(null, 0, 0);
 
-        /**
-         * The position, if known, or 0.
-         */
         final long pos;
 
-        /**
-         * The page, if in memory, or null.
-         */
         final Page page;
 
-        /**
-         * The descendant count for this child page.
-         */
         final long count;
 
-        public PageReference(Page page, long pos, long count) {
+        public PageReference(Page page) {
+            this(page, page.getPos(), page.getTotalCount());
+        }
+
+        PageReference(long pos, long count) {
+            this(null, pos, count);
+            assert pos != 0;
+        }
+
+        private PageReference(Page page, long pos, long count) {
             this.page = page;
             this.pos = pos;
             this.count = count;
         }
 
+        @Override
+        public String toString() {
+            return "Cnt:" + count + ", pos:" + DataUtils.getPageChunkId(pos) +
+                    "-" + DataUtils.getPageOffset(pos) + ":" + DataUtils.getPageMaxLength(pos) +
+                    (DataUtils.getPageType(pos) == 0 ? " leaf" : " node") + ", " + page;
+        }
     }
 
 }
