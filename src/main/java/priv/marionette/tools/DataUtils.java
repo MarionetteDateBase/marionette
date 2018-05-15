@@ -1103,4 +1103,8 @@ public final class DataUtils {
         return defaultValue;
     }
 
+    public static boolean isPageSaved(long pos) {
+        return pos != 0;
+    }
+
 }
