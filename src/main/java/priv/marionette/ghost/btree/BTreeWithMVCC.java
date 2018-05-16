@@ -134,30 +134,26 @@ public final class BTreeWithMVCC {
     private long creationTime;
 
     /**
-     * How long to retain old, persisted chunks, in milliseconds. For larger or
-     * equal to zero, a chunk is never directly overwritten if unused, but
-     * instead, the unused field is set. If smaller zero, chunks are directly
-     * overwritten if unused.
+     * 版本废弃延迟时间
      */
     private int retentionTime;
 
     private long lastCommitTime;
 
     /**
-     * The version of the current store operation (if any).
+     * 当前持久化操作版本
      */
     private volatile long currentStoreVersion = -1;
 
     /**
-     * Holds reference to a thread performing store operation (if any)
-     * or null if there is none is in progress.
+     * 正在进行持久化的线程的引用
      */
     private final AtomicReference<Thread> currentStoreThread = new AtomicReference<>();
 
     private volatile boolean metaChanged;
 
     /**
-     * The delay in milliseconds to automatically commit and write changes.
+     * autoCommit延迟
      */
     private int autoCommitDelay;
 
