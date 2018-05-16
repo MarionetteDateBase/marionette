@@ -102,36 +102,34 @@ public final class BTreeWithMVCC {
     private volatile long currentVersion;
 
     /**
-     * The version of the last stored chunk, or -1 if nothing was stored so far.
+     * 最新的chunk持久化版本，如果没有持久化操作则为-1
      */
     private long lastStoredVersion = INITIAL_VERSION;
 
     /**
-     * Oldest store version in use. All version beyond this can be safely dropped
+     * 正在使用中的最旧版本号，在此之前的数据版本可以无条件释放
      */
     private final AtomicLong oldestVersionToKeep = new AtomicLong();
 
     /**
-     * Collection of all versions used by currently open transactions.
+     * 在开启事务性操作后记录所有新的版本
      */
     private final Deque<TxCounter> versions = new LinkedList<>();
 
     /**
-     * Counter of open transactions for the latest (current) store version
+     * 当前版本上正在进行的事务性操作数
      */
     private volatile TxCounter currentTxCounter = new TxCounter(currentVersion);
 
     /**
-     * The estimated memory used by unsaved pages. This number is not accurate,
-     * also because it may be changed concurrently, and because temporary pages
-     * are counted.
+     * 非持久化的page所需要占用的最基本内存大小(估算)
      */
     private int unsavedMemory;
     private final int autoCommitMemory;
     private volatile boolean saveNeeded;
 
     /**
-     * The time the store was created, in milliseconds since 1970.
+     * 创建时间(unix时间戳)
      */
     private long creationTime;
 

@@ -209,19 +209,11 @@ public abstract class Page implements Cloneable{
     }
 
 
-    public int getMemory() {
+    public final int getMemory() {
         if (isPersistent()) {
-            if (BTreeWithMVCC.ASSERT) {
-                int mem = memory;
-                recalculateMemory();
-                if (mem != memory) {
-                    throw DataUtils.newIllegalStateException(
-                            DataUtils.ERROR_INTERNAL, "Memory calculation error");
-                }
-            }
             return memory;
         }
-        return getKeyCount();
+        return 0;
     }
 
     public int getKeyCount() {
