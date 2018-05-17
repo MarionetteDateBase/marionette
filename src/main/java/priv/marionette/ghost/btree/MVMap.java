@@ -187,8 +187,8 @@ public class MVMap<K,V> extends AbstractMap<K, V>
                         if (index < 0) {
                             p.insertLeaf(-index - 1, key, value);
                             int keyCount;
-                            while ((keyCount = p.getKeyCount()) > store.getKeysPerPage()
-                                    || p.getMemory() > store.getMaxPageSize()
+                            while ((keyCount = p.getKeyCount()) > bTree.getKeysPerPage()
+                                    || p.getMemory() > bTree.getMaxPageSize()
                                     && keyCount > (p.isLeaf() ? 1 : 2)) {
                                 long totalCount = p.getTotalCount();
                                 int at = keyCount >> 1;
@@ -239,8 +239,8 @@ public class MVMap<K,V> extends AbstractMap<K, V>
                     tip.page.removePage();
                     tip = tip.parent;
                 }
-                if (store.getFileStore() != null) {
-                    store.registerUnsavedPage(unsavedMemory);
+                if (bTree.getFileStore() != null) {
+                    bTree.registerUnsavedPage(unsavedMemory);
                 }
                 return result;
             } finally {
@@ -276,6 +276,15 @@ public class MVMap<K,V> extends AbstractMap<K, V>
                 && root.compareAndSet(rootReference, new RootReference(rootReference));
     }
 
+    private void unlockRoot(Page newRoot, int attempt) {
+        boolean success;
+        do {
+            RootReference rootReference = getRoot();
+            RootReference updatedRootReference = new RootReference(rootReference, newRoot, attempt);
+            success = root.compareAndSet(rootReference, updatedRootReference);
+        } while(!success);
+    }
+
     public final RootReference getRoot() {
         return root.get();
     }
@@ -292,51 +301,18 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return bTree;
     }
 
-    protected Page splitRootIfNeeded(Page p, long writeVersion) {
-        if (p.getMemory() <= bTree.getPageSplitSize() || p.getKeyCount() <= 1) {
-            return p;
-        }
-        int at = p.getKeyCount() / 2;
-        long totalCount = p.getTotalCount();
-        Object k = p.getKey(at);
-        Page split = p.split(at);
-        Object[] keys = { k };
-        Page.PageReference[] children = {
-                new Page.PageReference(p, p.getPos(), p.getTotalCount()),
-                new Page.PageReference(split, split.getPos(), split.getTotalCount()),
-        };
-        p = Page.create(this, writeVersion,
-                keys, null,
-                children,
-                totalCount, 0);
-        return p;
-    }
 
-    protected void newRoot(Page newRoot) {
-        if (root != newRoot) {
-            removeUnusedOldVersions();
-            if (root.getVersion() != newRoot.getVersion()) {
-                Page last = oldRoots.peekLast();
-                if (last == null || last.getVersion() != root.getVersion()) {
-                    oldRoots.add(root);
-                }
-            }
-            root = newRoot;
-        }
-    }
-
-    void removeUnusedOldVersions() {
+    void removeUnusedOldVersions(RootReference rootReference) {
         long oldest = bTree.getOldestVersionToKeep();
-        if (oldest == -1) {
-            return;
-        }
-        Page last = oldRoots.peekLast();
-        while (true) {
-            Page p = oldRoots.peekFirst();
-            if (p == null || p.getVersion() >= oldest || p == last) {
-                break;
+        // We need to keep at least one previous version (if any) here,
+        // because in order to retain whole history of some version
+        // we really need last root of the previous version.
+        // Root labeled with version "X" is the LAST known root for that version
+        // and therefore the FIRST known root for the version "X+1"
+        for(RootReference rootRef = rootReference; rootRef != null; rootRef = rootRef.previous) {
+            if (rootRef.version < oldest) {
+                rootRef.previous = null;
             }
-            oldRoots.removeFirst(p);
         }
     }
 
