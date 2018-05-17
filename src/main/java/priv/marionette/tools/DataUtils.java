@@ -1031,8 +1031,7 @@ public final class DataUtils {
      * @return the parsed value
      * @throws IllegalStateException if parsing fails
      */
-    public static int readHexInt(HashMap<String, ? extends Object> map,
-            String key, int defaultValue) {
+    public static int readHexInt(Map<String, ?> map, String key, int defaultValue) {
         Object v = map.get(key);
         if (v == null) {
             return defaultValue;

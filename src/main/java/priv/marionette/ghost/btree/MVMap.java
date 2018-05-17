@@ -2,7 +2,6 @@ package priv.marionette.ghost.btree;
 
 import priv.marionette.ghost.type.DataType;
 import priv.marionette.ghost.type.StringDataType;
-import priv.marionette.tools.ConcurrentArrayList;
 import priv.marionette.tools.DataUtils;
 
 import java.util.*;
@@ -99,6 +98,13 @@ public class MVMap<K,V> extends AbstractMap<K, V>
      */
     protected void init() {}
 
+    public Page createEmptyLeaf() {
+        return Page.createEmptyLeaf(this);
+    }
+
+    final void setInitialRoot(Page rootPage, long version) {
+        root.set(new RootReference(rootPage, version));
+    }
 
     @Override
     public V put(K key, V value) {
@@ -109,6 +115,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         DataUtils.checkArgument(value != null, "The value may not be null");
         return operate(key, value, decisionMaker);
     }
+
 
     public V operate(K key, V value, DecisionMaker<? super V> decisionMaker) {
         beforeWrite();
@@ -244,6 +251,35 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         }
     }
 
+    private boolean lockRoot(DecisionMaker<? super V> decisionMaker, RootReference rootReference,
+                             int attempt, int contention) {
+        boolean success = lockRoot(rootReference);
+        if (!success) {
+            decisionMaker.reset();
+            if(attempt > 4) {
+                if (attempt <= 24) {
+                    Thread.yield();
+                } else {
+                    try {
+                        Thread.sleep(0, 100 / contention + 50);
+                    } catch (InterruptedException ex) {
+                        throw new RuntimeException(ex);
+                    }
+                }
+            }
+        }
+        return success;
+    }
+
+    private boolean lockRoot(RootReference rootReference) {
+        return !rootReference.lockedForUpdate
+                && root.compareAndSet(rootReference, new RootReference(rootReference));
+    }
+
+    public final RootReference getRoot() {
+        return root.get();
+    }
+
     int compare(Object a, Object b) {
         return keyType.compare(a, b);
     }
@@ -305,7 +341,9 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     }
 
 
-
+    /**
+     * 检测map是否可写
+     */
     protected void beforeWrite() {
         if (closed) {
             throw DataUtils.newIllegalStateException(
@@ -719,27 +757,27 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     public static final class RootReference
     {
         /**
-         * The root page.
+         * 根节点
          */
         public  final    Page          root;
         /**
-         * The version used for writing.
+         * 写时版本
          */
         public  final    long          version;
         /**
-         * Indicator that map is locked for update.
+         * 是否已在update时被锁
          */
         final    boolean       lockedForUpdate;
         /**
-         * Reference to the previous root in the chain.
+         * 链表中前一个根节点的引用
          */
         public  volatile RootReference previous;
         /**
-         * Counter for successful root updates.
+         * update成功次数
          */
         public  final    long          updateCounter;
         /**
-         * Counter for attempted root updates.
+         * update尝试次数
          */
         public  final    long          updateAttemptCounter;
 
