@@ -523,9 +523,14 @@ public final class BTreeWithMVCC {
         FileStore f = fileStore;
         if (f != null && !f.isReadOnly()) {
             stopBackgroundThread();
-            if (hasUnsavedChanges()) {
-                commitAndSave();
+            for (MVMap<?, ?> map : maps.values()) {
+                if (map.isClosed()) {
+                    if (meta.remove(MVMap.getMapRootKey(map.getId())) != null) {
+                        markMetaChanged();
+                    }
+                }
             }
+            commit();
         }
         closeStore(true);
     }
@@ -565,6 +570,16 @@ public final class BTreeWithMVCC {
                 tryCommit();
             }
         }
+    }
+
+    /**
+     * 在autoCommit开启后，定时或内存数据超出阀值时，对数据更改做持久化操作
+     * @return
+     */
+    public synchronized long commit() {
+        currentStoreThread.set(Thread.currentThread());
+        store();
+        return currentVersion;
     }
 
     public long tryCommit() {
@@ -617,28 +632,209 @@ public final class BTreeWithMVCC {
     }
 
 
-    private long storeNow() {
-        try {
-            return storeNowTry();
-        } catch (IllegalStateException e) {
-            panic(e);
-            return -1;
+    private void storeNow() {
+        assert Thread.holdsLock(this);
+        long time = getTimeSinceCreation();
+        freeUnusedIfNeeded(time);
+        int currentUnsavedPageCount = unsavedMemory;
+        long storeVersion = currentStoreVersion;
+        long version = ++currentVersion;
+        lastCommitTime = time;
+
+        // the metadata of the last chunk was not stored so far, and needs to be
+        // set now (it's better not to update right after storing, because that
+        // would modify the meta map again)
+        int lastChunkId;
+        if (lastChunk == null) {
+            lastChunkId = 0;
+        } else {
+            lastChunkId = lastChunk.id;
+            meta.put(Chunk.getMetaKey(lastChunkId), lastChunk.asString());
+            markMetaChanged();
+            // never go backward in time
+            time = Math.max(lastChunk.time, time);
         }
+        int newChunkId = lastChunkId;
+        while (true) {
+            newChunkId = (newChunkId + 1) & Chunk.MAX_ID;
+            Chunk old = chunks.get(newChunkId);
+            if (old == null) {
+                break;
+            }
+            if (old.block == Long.MAX_VALUE) {
+                IllegalStateException e = DataUtils.newIllegalStateException(
+                        DataUtils.ERROR_INTERNAL,
+                        "Last block {0} not stored, possibly due to out-of-memory", old);
+                panic(e);
+            }
+        }
+        Chunk c = new Chunk(newChunkId);
+        c.pageCount = Integer.MAX_VALUE;
+        c.pageCountLive = Integer.MAX_VALUE;
+        c.maxLen = Long.MAX_VALUE;
+        c.maxLenLive = Long.MAX_VALUE;
+        c.metaRootPos = Long.MAX_VALUE;
+        c.block = Long.MAX_VALUE;
+        c.len = Integer.MAX_VALUE;
+        c.time = time;
+        c.version = version;
+        c.mapId = lastMapId;
+        c.next = Long.MAX_VALUE;
+        chunks.put(c.id, c);
+        // force a metadata update
+        meta.put(Chunk.getMetaKey(c.id), c.asString());
+        meta.remove(Chunk.getMetaKey(c.id));
+        markMetaChanged();
+        ArrayList<Page> changed = new ArrayList<>();
+        for (Iterator<MVMap<?, ?>> iter = maps.values().iterator(); iter.hasNext(); ) {
+            MVMap<?, ?> map = iter.next();
+            MVMap.RootReference rootReference = map.setWriteVersion(version);
+            if (rootReference == null) {
+                assert map.isClosed();
+                assert map.getVersion() < getOldestVersionToKeep();
+                meta.remove(MVMap.getMapRootKey(map.getId()));
+                iter.remove();
+            } else if (map.getCreateVersion() <= storeVersion && // if map was created after storing started, skip it
+                    !map.isVolatile() &&
+                    map.hasChangesSince(lastStoredVersion)) {
+                assert rootReference.version <= version : rootReference.version + " > " + version;
+                Page rootPage = rootReference.root;
+                if (!rootPage.isSaved() ||
+                        // after deletion previously saved leaf
+                        // may pop up as a root, but we still need
+                        // to save new root pos in meta
+                        rootPage.isLeaf()) {
+                    changed.add(rootPage);
+                }
+            }
+        }
+        WriteBuffer buff = getWriteBuffer();
+        // need to patch the header later
+        c.writeChunkHeader(buff, 0);
+        int headerLength = buff.position();
+        c.pageCount = 0;
+        c.pageCountLive = 0;
+        c.maxLen = 0;
+        c.maxLenLive = 0;
+        for (Page p : changed) {
+            String key = MVMap.getMapRootKey(p.getMapId());
+            if (p.getTotalCount() == 0) {
+                meta.remove(key);
+            } else {
+                p.writeUnsavedRecursive(c, buff);
+                long root = p.getPos();
+                meta.put(key, Long.toHexString(root));
+            }
+        }
+        applyFreedSpace();
+        MVMap.RootReference metaRootReference = meta.setWriteVersion(version);
+        assert metaRootReference != null;
+        assert metaRootReference.version == version : metaRootReference.version + " != " + version;
+        metaChanged = false;
+        onVersionChange(version);
+
+        Page metaRoot = metaRootReference.root;
+        metaRoot.writeUnsavedRecursive(c, buff);
+
+        int chunkLength = buff.position();
+
+        // add the store header and round to the next block
+        int length = MathUtils.roundUpInt(chunkLength +
+                Chunk.FOOTER_LENGTH, BLOCK_SIZE);
+        buff.limit(length);
+
+        long filePos = allocateFileSpace(length, !reuseSpace);
+        c.block = filePos / BLOCK_SIZE;
+        c.len = length / BLOCK_SIZE;
+        assert fileStore.getFileLengthInUse() == measureFileLengthInUse() :
+                fileStore.getFileLengthInUse() + " != " + measureFileLengthInUse() + " " + c;
+        c.metaRootPos = metaRoot.getPos();
+        // calculate and set the likely next position
+        if (reuseSpace) {
+            c.next = fileStore.predictAllocation(c.len * BLOCK_SIZE) / BLOCK_SIZE;
+        } else {
+            // just after this chunk
+            c.next = 0;
+        }
+        buff.position(0);
+        c.writeChunkHeader(buff, headerLength);
+
+        buff.position(buff.limit() - Chunk.FOOTER_LENGTH);
+        buff.put(c.getFooterBytes());
+
+        buff.position(0);
+        write(filePos, buff.getBuffer());
+        releaseWriteBuffer(buff);
+
+        // whether we need to write the store header
+        boolean writeStoreHeader = false;
+        // end of the used space is not necessarily the end of the file
+        boolean storeAtEndOfFile = filePos + length >= fileStore.size();
+        if (!storeAtEndOfFile) {
+            if (lastChunk == null) {
+                writeStoreHeader = true;
+            } else if (lastChunk.next != c.block) {
+                // the last prediction did not matched
+                writeStoreHeader = true;
+            } else {
+                long headerVersion = DataUtils.readHexLong(
+                        storeHeader, "version", 0);
+                if (lastChunk.version - headerVersion > 20) {
+                    // we write after at least every 20 versions
+                    writeStoreHeader = true;
+                } else {
+                    int chunkId = DataUtils.readHexInt(storeHeader, "chunk", 0);
+                    while (true) {
+                        Chunk old = chunks.get(chunkId);
+                        if (old == null) {
+                            // one of the chunks in between
+                            // was removed
+                            writeStoreHeader = true;
+                            break;
+                        }
+                        if (chunkId == lastChunk.id) {
+                            break;
+                        }
+                        chunkId++;
+                    }
+                }
+            }
+        }
+
+
+        lastChunk = c;
+        if (writeStoreHeader) {
+            writeStoreHeader();
+        }
+        if (!storeAtEndOfFile) {
+            // may only shrink after the store header was written
+            shrinkFileIfPossible(1);
+        }
+        for (Page p : changed) {
+            if (p.getTotalCount() > 0) {
+                p.writeEnd();
+            }
+        }
+        metaRoot.writeEnd();
+
+        // some pages might have been changed in the meantime (in the newest
+        // version)
+        unsavedMemory = Math.max(0, unsavedMemory
+                - currentUnsavedPageCount);
+
+        lastStoredVersion = storeVersion;
     }
 
-    private long storeNowTry(){
-        long time = getTimeSinceCreation();
-        int freeDelay = retentionTime / 10;
+
+    private void freeUnusedIfNeeded(long time) {
+        int freeDelay = retentionTime / 5;
         if (time >= lastFreeUnusedChunks + freeDelay) {
             lastFreeUnusedChunks = time;
             freeUnusedChunks();
             lastFreeUnusedChunks = getTimeSinceCreation();
         }
-        int currentUnsavedPageCount = unsavedMemory;
-        long storeVersion = currentStoreVersion;
-        long version = ++currentVersion;
-
     }
+
 
     private synchronized void freeUnusedChunks() {
         if (lastChunk == null || !reuseSpace) {
