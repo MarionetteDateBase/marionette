@@ -539,6 +539,38 @@ public abstract class Page implements Cloneable{
      */
     abstract Page copy(MVMap<?, ?> map);
 
+    /**
+     * Create a copy of this page.
+     *
+     * @return a mutable copy of this page
+     */
+    public final Page copy() {
+        return copy(false);
+    }
+
+    public final Page copy(boolean countRemoval) {
+        Page newPage = clone();
+        newPage.pos = 0;
+        // mark the old as deleted
+        if(countRemoval) {
+            removePage();
+            if(isPersistent()) {
+                map.bTree.registerUnsavedPage(newPage.getMemory());
+            }
+        }
+        return newPage;
+    }
+
+    @Override
+    protected final Page clone() {
+        Page clone;
+        try {
+            clone = (Page) super.clone();
+        } catch (CloneNotSupportedException impossible) {
+            throw new RuntimeException(impossible);
+        }
+        return clone;
+    }
 
     public Object getKey(int index) {
         return keys[index];

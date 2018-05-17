@@ -6,7 +6,6 @@ import priv.marionette.compress.CompressLZF;
 import priv.marionette.compress.Compressor;
 import priv.marionette.engine.Constants;
 import priv.marionette.ghost.*;
-import priv.marionette.ghost.type.StringDataType;
 import priv.marionette.tools.DataUtils;
 import priv.marionette.tools.New;
 import static priv.marionette.ghost.btree.MVMap.INITIAL_VERSION;
@@ -209,20 +208,17 @@ public final class BTreeWithMVCC {
             pgSplitSize = (int)cache.getMaxItemSize();
         }
         pageSplitSize = pgSplitSize;
+        keysPerPage = DataUtils.getConfigParam(config, "keysPerPage", 48);
         backgroundExceptionHandler =
                 (Thread.UncaughtExceptionHandler)config.get("backgroundExceptionHandler");
-        meta = new MVMap<>(StringDataType.INSTANCE,
-                StringDataType.INSTANCE);
-        HashMap<String, Object> c = new HashMap<>();
-        c.put("id", 0);
-        c.put("createVersion", currentVersion);
-        meta.init(this, c);
+        meta = new MVMap<>(this);
+        meta.init();
         if (this.fileStore != null) {
             retentionTime = this.fileStore.getDefaultRetentionTime();
             int kb = DataUtils.getConfigParam(config, "autoCommitBufferSize", 1024);
-            // 内存数据与序列化后数据大小之比约为19:1
+            // 19 KB memory is about 1 KB storage
             autoCommitMemory = kb * 1024 * 19;
-            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 50);
+            autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 40);
             char[] encryptionKey = (char[]) config.get("encryptionKey");
             try {
                 if (!fileStoreIsProvided) {
@@ -232,7 +228,7 @@ public final class BTreeWithMVCC {
                 if (this.fileStore.size() == 0) {
                     creationTime = getTimeAbsolute();
                     lastCommitTime = creationTime;
-                    storeHeader.put("M", 2);
+                    storeHeader.put("H", 2);
                     storeHeader.put("blockSize", BLOCK_SIZE);
                     storeHeader.put("format", FORMAT_WRITE);
                     storeHeader.put("created", creationTime);
@@ -249,7 +245,25 @@ public final class BTreeWithMVCC {
             }
             lastCommitTime = getTimeSinceCreation();
 
-            // autoCommit慢启动
+            Set<String> rootsToRemove = new HashSet<>();
+            for (Iterator<String> it = meta.keyIterator("root."); it.hasNext();) {
+                String key = it.next();
+                if (!key.startsWith("root.")) {
+                    break;
+                }
+                String mapId = key.substring(key.lastIndexOf('.') + 1);
+                if(!meta.containsKey("map."+mapId)) {
+                    rootsToRemove.add(key);
+                }
+            }
+
+            for (String key : rootsToRemove) {
+                meta.remove(key);
+                markMetaChanged();
+            }
+
+            // setAutoCommitDelay starts the thread, but only if
+            // the parameter is different from the old value
             int delay = DataUtils.getConfigParam(config, "autoCommitDelay", 1000);
             setAutoCommitDelay(delay);
         } else {

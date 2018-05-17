@@ -1,11 +1,13 @@
 package priv.marionette.ghost.btree;
 
 import priv.marionette.ghost.type.DataType;
+import priv.marionette.ghost.type.StringDataType;
 import priv.marionette.tools.ConcurrentArrayList;
 import priv.marionette.tools.DataUtils;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * B树节点多版本并发控制持久化操作类
@@ -27,37 +29,61 @@ public class MVMap<K,V> extends AbstractMap<K, V>
 
     protected BTreeWithMVCC bTree;
 
-
     /**
-     * 当前BTree的根结点
+     * Reference to the current root page.
      */
-    protected volatile Page root;
-
-    /**
-     * 当前分支版本
-     */
-    protected volatile long writeVersion;
+    private final AtomicReference<RootReference> root;
 
     private int id;
     private long createVersion;
     private final DataType keyType;
     private final DataType valueType;
 
-    static final long INITIAL_VERSION = -1;
-
-    private final ConcurrentArrayList<Page> oldRoots =
-            new ConcurrentArrayList<>();
-
     /**
-     * 跨越内存栅栏时强制同步map的开启状态，避免写入一个已关闭的文件流
+     * Whether the map is closed. Volatile so we don't accidentally write to a
+     * closed map in multithreaded mode.
      */
-    private volatile boolean closed;
+    private volatile  boolean closed;
     private boolean readOnly;
     private boolean isVolatile;
 
-    protected MVMap(DataType keyType, DataType valueType) {
+    /**
+     * This designates the "last stored" version for a store which was
+     * just open for the first time.
+     */
+    static final long INITIAL_VERSION = -1;
+
+    protected MVMap(Map<String, Object> config) {
+        this((BTreeWithMVCC) config.get("store"),
+                (DataType) config.get("key"),
+                (DataType) config.get("val"),
+                DataUtils.readHexInt(config, "id", 0),
+                DataUtils.readHexLong(config, "createVersion", 0),
+                new AtomicReference<RootReference>()
+        );
+        setInitialRoot(createEmptyLeaf(), bTree.getCurrentVersion());
+    }
+
+    // constructor for cloneIt()
+    protected MVMap(MVMap<K, V> source) {
+        this(source.bTree, source.keyType, source.valueType, source.id, source.createVersion,
+                new AtomicReference<>(source.root.get()));
+    }
+
+    // meta map constructor
+    MVMap(BTreeWithMVCC bTree) {
+        this(bTree, StringDataType.INSTANCE,StringDataType.INSTANCE, 0, 0, new AtomicReference<RootReference>());
+        setInitialRoot(createEmptyLeaf(), bTree.getCurrentVersion());
+    }
+
+    private MVMap(BTreeWithMVCC bTree, DataType keyType, DataType valueType, int id, long createVersion,
+                  AtomicReference<RootReference> root) {
+        this.bTree = bTree;
+        this.id = id;
+        this.createVersion = createVersion;
         this.keyType = keyType;
         this.valueType = valueType;
+        this.root = root;
     }
 
     static String getMapRootKey(int mapId) {
@@ -68,64 +94,155 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return "map." + Integer.toHexString(mapId);
     }
 
-    protected void init(BTreeWithMVCC bTree, HashMap<String, Object> config) {
-        this.bTree = bTree;
-        this.id = DataUtils.readHexInt(config, "id", 0);
-        this.createVersion = DataUtils.readHexLong(config, "createVersion", 0);
-        this.writeVersion = bTree.getCurrentVersion();
-        this.root = Page.createEmpty(this,  -1);
-    }
-
+    /**
+     * Initialize this map.
+     */
+    protected void init() {}
 
 
     @Override
-    @SuppressWarnings("unchecked")
-    public synchronized V put(K key, V value) {
+    public V put(K key, V value) {
+        return put(key, value, DecisionMaker.PUT);
+    }
+
+    public final V put(K key, V value, DecisionMaker<? super V> decisionMaker) {
         DataUtils.checkArgument(value != null, "The value may not be null");
+        return operate(key, value, decisionMaker);
+    }
+
+    public V operate(K key, V value, DecisionMaker<? super V> decisionMaker) {
         beforeWrite();
-        long v = writeVersion;
-        //写时复制
-        Page p = root.copy(v);
-        //判断节点是否需要分裂至半满
-        p = splitRootIfNeeded(p, v);
-        Object result = put(p, v, key, value);
-        newRoot(p);
-        return (V) result;
-    }
-
-    protected Object put(Page p, long writeVersion, Object key, Object value) {
-        int index = p.binarySearch(key);
-        if (p.isLeaf()) {
-            if (index < 0) {
-                index = -index - 1;
-                p.insertLeaf(index, key, value);
-                return null;
+        int attempt = 0;
+        RootReference oldRootReference = null;
+        while(true) {
+            RootReference rootReference = getRoot();
+            int contention = 0;
+            if (oldRootReference != null) {
+                long updateAttemptCounter = rootReference.updateAttemptCounter -
+                        oldRootReference.updateAttemptCounter;
+                assert updateAttemptCounter >= 0 : updateAttemptCounter;
+                long updateCounter = rootReference.updateCounter - oldRootReference.updateCounter;
+                assert updateCounter >= 0 : updateCounter;
+                assert updateAttemptCounter >= updateCounter : updateAttemptCounter + " >= " + updateCounter;
+                contention = (int)((updateAttemptCounter+1) / (updateCounter+1));
             }
-            return p.setValue(index, value);
-        }
-        // p是内部节点的情况下
-        if (index < 0) {
-            index = -index - 1;
-        } else {
-            index++;
-        }
-        //如果是内部节点，那么它的key对应的子节点也要用同一版本号复制一份
-        Page c = p.getChildPage(index).copy(writeVersion);
-        if (c.getMemory() > bTree.getPageSplitSize() && c.getKeyCount() > 1) {
-            // 自顶向下分裂
-            int at = c.getKeyCount() / 2;
-            Object k = c.getKey(at);
-            Page split = c.split(at);
-            p.setChild(index, split);
-            p.insertNode(index, k, c);
-            // 递归调用直到达到叶子节点
-            return put(p, writeVersion, key, value);
-        }
-        Object result = put(c, writeVersion, key, value);
-        p.setChild(index, c);
-        return result;
-    }
+            oldRootReference = rootReference;
+            ++attempt;
+            CursorPos pos = traverseDown(rootReference.root, key);
+            Page p = pos.page;
+            int index = pos.index;
+            CursorPos tip = pos;
+            pos = pos.parent;
+            @SuppressWarnings("unchecked")
+            V result = index < 0 ? null : (V)p.getValue(index);
+            Decision decision = decisionMaker.decide(result, value);
 
+            int unsavedMemory = 0;
+            boolean needUnlock = false;
+            try {
+                switch (decision) {
+                    case ABORT:
+                        if(rootReference != getRoot()) {
+                            decisionMaker.reset();
+                            continue;
+                        }
+                        return result;
+                    case REMOVE: {
+                        if (index < 0) {
+                            return null;
+                        }
+                        if (attempt > 2 && !(needUnlock = lockRoot(decisionMaker, rootReference,
+                                attempt, contention))) {
+                            continue;
+                        }
+                        if (p.getTotalCount() == 1 && pos != null) {
+                            p = pos.page;
+                            index = pos.index;
+                            pos = pos.parent;
+                            if (p.getKeyCount() == 1) {
+                                assert index <= 1;
+                                p = p.getChildPage(1 - index);
+                                break;
+                            }
+                            assert p.getKeyCount() > 1;
+                        }
+                        p = p.copy();
+                        p.remove(index);
+                        break;
+                    }
+                    case PUT: {
+                        if (attempt > 2 && !(needUnlock = lockRoot(decisionMaker, rootReference,
+                                attempt, contention))) {
+                            continue;
+                        }
+                        value = decisionMaker.selectValue(result, value);
+                        p = p.copy();
+                        if (index < 0) {
+                            p.insertLeaf(-index - 1, key, value);
+                            int keyCount;
+                            while ((keyCount = p.getKeyCount()) > store.getKeysPerPage()
+                                    || p.getMemory() > store.getMaxPageSize()
+                                    && keyCount > (p.isLeaf() ? 1 : 2)) {
+                                long totalCount = p.getTotalCount();
+                                int at = keyCount >> 1;
+                                Object k = p.getKey(at);
+                                Page split = p.split(at);
+                                unsavedMemory += p.getMemory();
+                                unsavedMemory += split.getMemory();
+                                if (pos == null) {
+                                    Object keys[] = { k };
+                                    Page.PageReference children[] = {
+                                            new Page.PageReference(p),
+                                            new Page.PageReference(split)
+                                    };
+                                    p = Page.create(this, keys, null, children, totalCount, 0);
+                                    break;
+                                }
+                                Page c = p;
+                                p = pos.page;
+                                index = pos.index;
+                                pos = pos.parent;
+                                p = p.copy();
+                                p.setChild(index, split);
+                                p.insertNode(index, k, c);
+                            }
+                        } else {
+                            p.setValue(index, value);
+                        }
+                        break;
+                    }
+                }
+                unsavedMemory += p.getMemory();
+                while (pos != null) {
+                    Page c = p;
+                    p = pos.page;
+                    p = p.copy();
+                    p.setChild(pos.index, c);
+                    unsavedMemory += p.getMemory();
+                    pos = pos.parent;
+                }
+                if(needUnlock) {
+                    unlockRoot(p, attempt);
+                    needUnlock = false;
+                } else if(!updateRoot(rootReference, p, attempt)) {
+                    decisionMaker.reset();
+                    continue;
+                }
+                while (tip != null) {
+                    tip.page.removePage();
+                    tip = tip.parent;
+                }
+                if (store.getFileStore() != null) {
+                    store.registerUnsavedPage(unsavedMemory);
+                }
+                return result;
+            } finally {
+                if(needUnlock) {
+                    unlockRoot(rootReference.root, attempt);
+                }
+            }
+        }
+    }
 
     int compare(Object a, Object b) {
         return keyType.compare(a, b);
@@ -599,7 +716,174 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return p.getRawChildPageCount();
     }
 
+    public static final class RootReference
+    {
+        /**
+         * The root page.
+         */
+        public  final    Page          root;
+        /**
+         * The version used for writing.
+         */
+        public  final    long          version;
+        /**
+         * Indicator that map is locked for update.
+         */
+        final    boolean       lockedForUpdate;
+        /**
+         * Reference to the previous root in the chain.
+         */
+        public  volatile RootReference previous;
+        /**
+         * Counter for successful root updates.
+         */
+        public  final    long          updateCounter;
+        /**
+         * Counter for attempted root updates.
+         */
+        public  final    long          updateAttemptCounter;
 
+        RootReference(Page root, long version, RootReference previous,
+                      long updateCounter, long updateAttemptCounter,
+                      boolean lockedForUpdate) {
+            this.root = root;
+            this.version = version;
+            this.previous = previous;
+            this.updateCounter = updateCounter;
+            this.updateAttemptCounter = updateAttemptCounter;
+            this.lockedForUpdate = lockedForUpdate;
+        }
+
+        // This one is used for locking
+        RootReference(RootReference r) {
+            this.root = r.root;
+            this.version = r.version;
+            this.previous = r.previous;
+            this.updateCounter = r.updateCounter;
+            this.updateAttemptCounter = r.updateAttemptCounter;
+            this.lockedForUpdate = true;
+        }
+
+        // This one is used for unlocking
+        RootReference(RootReference r, Page root, int attempt) {
+            this.root = root;
+            this.version = r.version;
+            this.previous = r.previous;
+            this.updateCounter = r.updateCounter + 1;
+            this.updateAttemptCounter = r.updateAttemptCounter + attempt;
+            this.lockedForUpdate = false;
+        }
+
+        // This one is used for version change
+        RootReference(RootReference r, long version, int attempt) {
+            RootReference previous = r;
+            RootReference tmp;
+            while ((tmp = previous.previous) != null && tmp.root == r.root) {
+                previous = tmp;
+            }
+            this.root = r.root;
+            this.version = version;
+            this.previous = previous;
+            this.updateCounter = r.updateCounter + 1;
+            this.updateAttemptCounter = r.updateAttemptCounter + attempt;
+            this.lockedForUpdate = r.lockedForUpdate;
+        }
+
+        // This one is used for r/o snapshots
+        RootReference(Page root, long version) {
+            this.root = root;
+            this.version = version;
+            this.previous = null;
+            this.updateCounter = 1;
+            this.updateAttemptCounter = 1;
+            this.lockedForUpdate = false;
+        }
+
+        @Override
+        public String toString() {
+            return "RootReference("+ System.identityHashCode(root)+","+version+","+ lockedForUpdate +")";
+        }
+    }
+
+    public enum Decision { ABORT, REMOVE, PUT }
+
+    /**
+     * Class DecisionMaker为MVMap.operate方法提供回调接口来决定决定具体的write策略
+     *
+     * @param <V> value type of the map
+     */
+    public abstract static class DecisionMaker<V>
+    {
+
+        public abstract Decision decide(V existingValue, V providedValue);
+
+        public static final DecisionMaker<Object> DEFAULT = new DecisionMaker<Object>() {
+            @Override
+            public Decision decide(Object existingValue, Object providedValue) {
+                return providedValue == null ? Decision.REMOVE : Decision.PUT;
+            }
+
+            @Override
+            public String toString() {
+                return "default";
+            }
+        };
+
+        public static final DecisionMaker<Object> PUT = new DecisionMaker<Object>() {
+            @Override
+            public Decision decide(Object existingValue, Object providedValue) {
+                return Decision.PUT;
+            }
+
+            @Override
+            public String toString() {
+                return "put";
+            }
+        };
+
+        public static final DecisionMaker<Object> REMOVE = new DecisionMaker<Object>() {
+            @Override
+            public Decision decide(Object existingValue, Object providedValue) {
+                return Decision.REMOVE;
+            }
+
+            @Override
+            public String toString() {
+                return "remove";
+            }
+        };
+
+        static final DecisionMaker<Object> IF_ABSENT = new DecisionMaker<Object>() {
+            @Override
+            public Decision decide(Object existingValue, Object providedValue) {
+                return existingValue == null ? Decision.PUT : Decision.ABORT;
+            }
+
+            @Override
+            public String toString() {
+                return "if_absent";
+            }
+        };
+
+        static final DecisionMaker<Object> IF_PRESENT = new DecisionMaker<Object>() {
+            @Override
+            public Decision decide(Object existingValue, Object providedValue) {
+                return existingValue != null ? Decision.PUT : Decision.ABORT;
+            }
+
+            @Override
+            public String toString() {
+                return "if_present";
+            }
+        };
+
+
+        public <T extends V> T selectValue(T existingValue, T providedValue) {
+            return providedValue;
+        }
+
+        public void reset() {}
+    }
 
 
 
