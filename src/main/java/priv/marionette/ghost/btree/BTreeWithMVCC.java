@@ -1507,6 +1507,11 @@ public final class BTreeWithMVCC {
         return (T) m;
     }
 
+    long getRootPos(int mapId, long version) {
+        MVMap<String, String> oldMeta = getMetaMap(version);
+        return getRootPos(oldMeta, mapId);
+    }
+
     private static long getRootPos(MVMap<String, String> map, int mapId) {
         String root = map.get(MVMap.getMapRootKey(mapId));
         return root == null ? 0 : DataUtils.parseHexLong(root);

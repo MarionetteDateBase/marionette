@@ -738,8 +738,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     }
 
 
-
-    public MVMap<K, V> openVersion(long version) {
+    public final MVMap<K, V> openVersion(long version) {
         if (readOnly) {
             throw DataUtils.newUnsupportedOperationException(
                     "This map is read-only; need to call " +
@@ -748,49 +747,40 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         DataUtils.checkArgument(version >= createVersion,
                 "Unknown version {0}; this map was created in version is {1}",
                 version, createVersion);
-        Page newest = null;
-        // need to copy because it can change
-        Page r = root;
-        if (version >= r.getVersion() &&
-                (version == writeVersion ||
-                        r.getVersion() >= 0 ||
-                        version <= createVersion ||
-                        bTree.getFileStore() == null)) {
-            newest = r;
-        } else {
-            Page last = oldRoots.peekFirst();
-            if (last == null || version < last.getVersion()) {
-                // smaller than all in-memory versions
-                return bTree.openMapVersion(version, id, this);
-            }
-            Iterator<Page> it = oldRoots.iterator();
-            while (it.hasNext()) {
-                Page p = it.next();
-                if (p.getVersion() > version) {
-                    break;
-                }
-                last = p;
-            }
-            newest = last;
+        RootReference rootReference = getRoot();
+        removeUnusedOldVersions(rootReference);
+        while (rootReference != null && rootReference.version > version) {
+            rootReference = rootReference.previous;
         }
-        MVMap<K, V> m = openReadOnly();
-        m.root = newest;
+
+        if (rootReference == null) {
+            // smaller than all in-memory versions
+            MVMap<K, V> map = openReadOnly(bTree.getRootPos(getId(), version), version);
+            return map;
+        }
+        MVMap<K, V> m = openReadOnly(rootReference.root, version);
+        assert m.getVersion() <= version : m.getVersion() + " <= " + version;
         return m;
     }
 
-    MVMap<K, V> openReadOnly() {
-        MVMap<K, V> m = new MVMap<>(keyType, valueType);
+    final MVMap<K, V> openReadOnly(long rootPos, long version) {
+        Page root = readOrCreateRootPage(rootPos);
+        return openReadOnly(root, version);
+    }
+
+    private MVMap<K, V> openReadOnly(Page root, long version) {
+        MVMap<K, V> m = cloneIt();
         m.readOnly = true;
-        HashMap<String, Object> config = new HashMap<>();
-        config.put("id", id);
-        config.put("createVersion", createVersion);
-        m.init(bTree, config);
-        m.root = root;
+        m.setInitialRoot(root, version);
         return m;
     }
 
-    public Cursor<K, V> cursor(K from) {
-        return new Cursor<>(this, root, from);
+    protected MVMap<K, V> cloneIt() {
+        return new MVMap<>(this);
+    }
+
+    public final Cursor<K, V> cursor(K from) {
+        return new Cursor<>(getRootPage(), from);
     }
 
     void close() {
