@@ -508,18 +508,20 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     }
 
 
-    public K getKey(long index) {
-        if (index < 0 || index >= size()) {
+    public final K getKey(long index) {
+        if (index < 0 || index >= sizeAsLong()) {
             return null;
         }
-        Page p = root;
+        Page p = getRootPage();
         long offset = 0;
         while (true) {
             if (p.isLeaf()) {
                 if (index >= offset + p.getKeyCount()) {
                     return null;
                 }
-                return (K) p.getKey((int) (index - offset));
+                @SuppressWarnings("unchecked")
+                K key = (K) p.getKey((int) (index - offset));
+                return key;
             }
             int i = 0, size = getChildPageCount(p);
             for (; i < size; i++) {
@@ -536,24 +538,26 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         }
     }
 
-    public long getKeyIndex(K key) {
-        if (size() == 0) {
+    public final long sizeAsLong() {
+        return getRootPage().getTotalCount();
+    }
+
+    public final long getKeyIndex(K key) {
+        Page p = getRootPage();
+        if (p.getTotalCount() == 0) {
             return -1;
         }
-        Page p = root;
         long offset = 0;
         while (true) {
             int x = p.binarySearch(key);
             if (p.isLeaf()) {
                 if (x < 0) {
-                    return -offset + x;
+                    offset = -offset;
                 }
                 return offset + x;
             }
-            if (x < 0) {
-                x = -x - 1;
-            } else {
-                x++;
+            if (x++ < 0) {
+                x = -x;
             }
             for (int i = 0; i < x; i++) {
                 offset += p.getCounts(i);
@@ -679,28 +683,8 @@ public class MVMap<K,V> extends AbstractMap<K, V>
 
     }
 
-    boolean rewrite(Set<Integer> set) {
-        // 回退至上一个版本并以此信息重写chunk，避免产生并发问题
-        long previousVersion = bTree.getCurrentVersion() - 1;
-        if (previousVersion < createVersion) {
-            return true;
-        }
-        MVMap<K, V> readMap;
-        try {
-            readMap = openVersion(previousVersion);
-        } catch (IllegalArgumentException e) {
-            return true;
-        }
-        try {
-            rewrite(readMap.root, set);
-            return true;
-        } catch (IllegalStateException e) {
-            if (DataUtils.getErrorCode(e.getMessage()) == DataUtils.ERROR_CHUNK_NOT_FOUND) {
-                // ignore
-                return false;
-            }
-            throw e;
-        }
+    final void rewrite(Set<Integer> set) {
+        rewrite(getRootPage(), set);
     }
 
     private int rewrite(Page p, Set<Integer> set) {
@@ -752,6 +736,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         }
         return writtenPageCount;
     }
+
 
 
     public MVMap<K, V> openVersion(long version) {
