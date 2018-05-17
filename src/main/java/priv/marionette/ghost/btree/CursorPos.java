@@ -20,7 +20,7 @@ public class CursorPos {
     /**
      * 父节点的page
      */
-    public final CursorPos parent;
+    public CursorPos parent;
 
     public CursorPos(Page page, int index, CursorPos parent) {
         this.page = page;

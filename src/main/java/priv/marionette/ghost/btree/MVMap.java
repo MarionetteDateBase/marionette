@@ -436,9 +436,15 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         }
     }
 
-    void setRootPos(long rootPos, long version) {
-        root = rootPos == 0 ? Page.createEmpty(this, -1) : readPage(rootPos);
-        root.setVersion(version);
+    final void setRootPos(long rootPos, long version) {
+        Page root = readOrCreateRootPage(rootPos);
+        setInitialRoot(root, version);
+        setWriteVersion(bTree.getCurrentVersion());
+    }
+
+    private Page readOrCreateRootPage(long rootPos) {
+        Page root = rootPos == 0 ? createEmptyLeaf() : readPage(rootPos);
+        return root;
     }
 
 
@@ -469,31 +475,36 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         };
     }
 
-    public Iterator<K> keyIterator(K from) {
-        return new Cursor<K, V>(this, root, from);
+    public final Iterator<K> keyIterator(K from) {
+        return new Cursor<K, V>(getRootPage(), from);
     }
 
+    public final Page getRootPage() {
+        return getRoot().root;
+    }
 
     /**
      * 回滚至某一版本
      * @param version
      */
-    void rollbackTo(long version) {
-        beforeWrite();
-        if (version <= createVersion) {
-        } else if (root.getVersion() >= version) {
-            while (true) {
-                Page last = oldRoots.peekLast();
-                if (last == null) {
-                    break;
-                }
-                oldRoots.removeLast(last);
-                root = last;
-                if (root.getVersion() < version) {
-                    break;
-                }
+    final void rollbackTo(long version) {
+        // check if the map was removed and re-created later ?
+        if (version > createVersion) {
+            rollbackRoot(version);
+        }
+    }
+
+    void rollbackRoot(long version)
+    {
+        RootReference rootReference = getRoot();
+        RootReference previous;
+        while (rootReference.version >= version && (previous = rootReference.previous) != null) {
+            if (root.compareAndSet(rootReference, previous)) {
+                rootReference = previous;
+                closed = false;
             }
         }
+        setWriteVersion(version);
     }
 
 
@@ -625,14 +636,13 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     }
 
     @Override
-    public Set<Map.Entry<K, V>> entrySet() {
-        final MVMap<K, V> map = this;
-        final Page root = this.root;
+    public final Set<Map.Entry<K, V>> entrySet() {
+        final Page root = this.getRootPage();
         return new AbstractSet<Entry<K, V>>() {
 
             @Override
             public Iterator<Entry<K, V>> iterator() {
-                final Cursor<K, V> cursor = new Cursor<>(map, root, null);
+                final Cursor<K, V> cursor = new Cursor<>(root, null);
                 return new Iterator<Entry<K, V>>() {
 
                     @Override
@@ -643,7 +653,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
                     @Override
                     public Entry<K, V> next() {
                         K k = cursor.next();
-                        return new DataUtils.MapEntry<>(k, cursor.getValue());
+                        return new SimpleImmutableEntry<>(k, cursor.getValue());
                     }
 
                     @Override

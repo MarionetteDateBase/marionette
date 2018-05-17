@@ -19,130 +19,157 @@ import java.util.Iterator;
  **/
 public class Cursor<K, V> implements Iterator<K> {
 
-    private final MVMap<K, ?> map;
-    private final K from;
-    private CursorPos pos;
-    private K current, last;
-    private V currentValue, lastValue;
+    private final K to;
+    private CursorPos cursorPos;
+    private CursorPos keeper;
+    private K current;
+    private K last;
+    private V lastValue;
     private Page lastPage;
-    private final Page root;
-    private boolean initialized;
 
-    Cursor(MVMap<K, ?> map, Page root, K from) {
-        this.map = map;
-        this.root = root;
-        this.from = from;
+    public Cursor(Page root, K from) {
+        this(root, from, null);
     }
 
+    public Cursor(Page root, K from, K to) {
+        this.cursorPos = traverseDown(root, from);
+        this.to = to;
+    }
 
     @Override
+    @SuppressWarnings("unchecked")
     public boolean hasNext() {
-        if (!initialized) {
-            min(root, from);
-            initialized = true;
-            fetchNext();
+        if (cursorPos != null) {
+            while (current == null) {
+                Page page = cursorPos.page;
+                int index = cursorPos.index;
+                if (index >= (page.isLeaf() ? page.getKeyCount() : page.map.getChildPageCount(page))) {
+                    CursorPos tmp = cursorPos;
+                    cursorPos = cursorPos.parent;
+                    tmp.parent = keeper;
+                    keeper = tmp;
+                    if(cursorPos == null)
+                    {
+                        return false;
+                    }
+                } else {
+                    while (!page.isLeaf()) {
+                        page = page.getChildPage(index);
+                        if (keeper == null) {
+                            cursorPos = new CursorPos(page, 0, cursorPos);
+                        } else {
+                            CursorPos tmp = keeper;
+                            keeper = keeper.parent;
+                            tmp.parent = cursorPos;
+                            tmp.page = page;
+                            tmp.index = 0;
+                            cursorPos = tmp;
+                        }
+                        index = 0;
+                    }
+                    K key = (K) page.getKey(index);
+                    if (to != null && page.map.getKeyType().compare(key, to) > 0) {
+                        return false;
+                    }
+                    current = last = key;
+                    lastValue = (V) page.getValue(index);
+                    lastPage = page;
+                }
+                ++cursorPos.index;
+            }
         }
         return current != null;
     }
 
     @Override
     public K next() {
-        hasNext();
-        K c = current;
-        last = current;
-        lastValue = currentValue;
-        lastPage = pos == null ? null : pos.page;
-        fetchNext();
-        return c;
+        if(!hasNext()) {
+            return null;
+        }
+        current = null;
+        return last;
     }
 
+    /**
+     * 最后读到的key
+     *
+     * @return the key or null
+     */
     public K getKey() {
         return last;
     }
 
+    /**
+     * 最后读到的value
+     *
+     * @return the value or null
+     */
     public V getValue() {
         return lastValue;
     }
 
+    /**
+     * 最后被访问的page
+     *
+     * @return the page
+     */
     Page getPage() {
         return lastPage;
     }
 
     public void skip(long n) {
-        if (!hasNext()) {
-            return;
-        }
         if (n < 10) {
-            while (n-- > 0) {
-                fetchNext();
+            while (n-- > 0 && hasNext()) {
+                next();
             }
-            return;
+        } else if(hasNext()) {
+            assert cursorPos != null;
+            CursorPos cp = cursorPos;
+            CursorPos parent;
+            while ((parent = cp.parent) != null) cp = parent;
+            Page root = cp.page;
+            @SuppressWarnings("unchecked")
+            MVMap<K, ?> map = (MVMap<K, ?>) root.map;
+            long index = map.getKeyIndex(next());
+            last = map.getKey(index + n);
+            this.cursorPos = traverseDown(root, last);
         }
-        long index = map.getKeyIndex(current);
-        K k = map.getKey(index + n);
-        pos = null;
-        min(root, k);
-        fetchNext();
     }
 
     @Override
     public void remove() {
         throw DataUtils.newUnsupportedOperationException(
-                "Removing is not supported");
+                "Removal is not supported");
     }
 
     /**
-     * 从指定的p节点开始压栈
-     * @param p
-     * @param from
+     * 从指定节点开始将key值大于等于的最左子节点，其实就是在压栈
+     *
+     * @param p the page to start from
+     * @param key the key to search, null means search for the first key
      */
-    private void min(Page p, K from) {
-        while (true) {
-            if (p.isLeaf()) {
-                int x = from == null ? 0 : p.binarySearch(from);
-                if (x < 0) {
-                    x = -x - 1;
+    public static CursorPos traverseDown(Page p, Object key) {
+        CursorPos cursorPos = null;
+        while (!p.isLeaf()) {
+            assert p.getKeyCount() > 0;
+            int index = 0;
+            if(key != null) {
+                index = p.binarySearch(key) + 1;
+                if (index < 0) {
+                    index = -index;
                 }
-                pos = new CursorPos(p, x, pos);
-                break;
             }
-            int x = from == null ? -1 : p.binarySearch(from);
-            if (x < 0) {
-                x = -x - 1;
-            } else {
-                x++;
-            }
-            pos = new CursorPos(p, x + 1, pos);
-            p = p.getChildPage(x);
+            cursorPos = new CursorPos(p, index, cursorPos);
+            p = p.getChildPage(index);
         }
-    }
-
-
-    /**
-     * 从栈低pop出非递减序列中的一个值，耗尽当前节点后向上backtrace,
-     * 然后从新一个pop出的栈节点的开始重新压栈，故此间2个函数结合，
-     * 实现了对b树的深度优先搜索
-     */
-    @SuppressWarnings("unchecked")
-    private void fetchNext() {
-        while (pos != null) {
-            if (pos.index < pos.page.getKeyCount()) {
-                int index = pos.index++;
-                current = (K) pos.page.getKey(index);
-                currentValue = (V) pos.page.getValue(index);
-                return;
-            }
-            pos = pos.parent;
-            if (pos == null) {
-                break;
-            }
-            if (pos.index < map.getChildPageCount(pos.page)) {
-                min(pos.page.getChildPage(pos.index++), null);
+        int index = 0;
+        if(key != null) {
+            index = p.binarySearch(key);
+            if (index < 0) {
+                index = -index - 1;
             }
         }
-        current = null;
+        return new CursorPos(p, index, cursorPos);
     }
-
-
 
 }
