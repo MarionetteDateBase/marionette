@@ -447,6 +447,10 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return root;
     }
 
+    final boolean hasChangesSince(long version) {
+        return getVersion() > version;
+    }
+
 
     Page readPage(long pos) {
         return bTree.readPage(this, pos);

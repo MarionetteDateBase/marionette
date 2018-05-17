@@ -293,6 +293,17 @@ public final class BTreeWithMVCC {
         }
     }
 
+    /**
+     * 以独占模式访问BP树
+     * @param fileName
+     * @return
+     */
+    public static BTreeWithMVCC open(String fileName) {
+        HashMap<String, Object> config = new HashMap<>();
+        config.put("fileName", fileName);
+        return new BTreeWithMVCC(config);
+    }
+
     public long getCurrentVersion() {
         return currentVersion;
     }
@@ -364,10 +375,16 @@ public final class BTreeWithMVCC {
     }
 
     private void panic(IllegalStateException e) {
-        handleException(e);
-        panicException = e;
-        closeImmediately();
+        if (!closed) {
+            handleException(e);
+            panicException = e;
+            closeImmediately();
+        }
         throw e;
+    }
+
+    public IllegalStateException getPanicException() {
+        return panicException;
     }
 
     private void handleException(Throwable ex) {
@@ -536,55 +553,67 @@ public final class BTreeWithMVCC {
         }
     }
 
+    /**
+     * 在写map之前先尝试commit已有的数据
+     * @param map
+     */
     void beforeWrite(MVMap<?, ?> map) {
-        if (saveNeeded) {
-            if (map == meta) {
-                //避免btree和concurrent control操作类同时持有锁从而引起死锁
-                return;
-            }
+        if (saveNeeded && fileStore != null && !closed && autoCommitDelay > 0) {
             saveNeeded = false;
+            // check again, because it could have been written by now
             if (unsavedMemory > autoCommitMemory && autoCommitMemory > 0) {
-                commitAndSave();
+                tryCommit();
             }
         }
+    }
+
+    public long tryCommit() {
+        if (currentStoreThread.compareAndSet(null, Thread.currentThread())) {
+            synchronized (this) {
+                store();
+            }
+        }
+        return currentVersion;
+    }
+
+    private void store() {
+        try {
+            if (!closed && hasUnsavedChangesInternal()) {
+                currentStoreVersion = currentVersion;
+                if (fileStore == null) {
+                    lastStoredVersion = currentVersion;
+                    ++currentVersion;
+                    setWriteVersion(currentVersion);
+                    metaChanged = false;
+                } else {
+                    if (fileStore.isReadOnly()) {
+                        throw DataUtils.newIllegalStateException(
+                                DataUtils.ERROR_WRITING_FAILED, "This store is read-only");
+                    }
+                    try {
+                        storeNow();
+                    } catch (IllegalStateException e) {
+                        panic(e);
+                    } catch (Throwable e) {
+                        panic(DataUtils.newIllegalStateException(DataUtils.ERROR_INTERNAL, e.toString(), e));
+                    }
+                }
+            }
+        } finally {
+            currentStoreVersion = -1;
+            currentStoreThread.set(null);
+        }
+    }
+
+    private boolean hasUnsavedChangesInternal() {
+        if (meta.hasChangesSince(lastStoredVersion)) {
+            return true;
+        }
+        return hasUnsavedChanges();
     }
 
     public int getPageSplitSize() {
         return pageSplitSize;
-    }
-
-
-
-    private synchronized long commitAndSave() {
-        if (closed) {
-            return currentVersion;
-        }
-        if (fileStore == null) {
-            throw DataUtils.newIllegalStateException(
-                    DataUtils.ERROR_WRITING_FAILED,
-                    "This is an in-memory store");
-        }
-        if (currentStoreVersion >= 0) {
-            // store is possibly called within store, if the meta map changed
-            return currentVersion;
-        }
-        if (!hasUnsavedChanges()) {
-            return currentVersion;
-        }
-        if (fileStore.isReadOnly()) {
-            throw DataUtils.newIllegalStateException(
-                    DataUtils.ERROR_WRITING_FAILED, "This store is read-only");
-        }
-        try {
-            currentStoreVersion = currentVersion;
-            currentStoreThread = Thread.currentThread();
-            return storeNow();
-        } finally {
-            // in any case reset the current store version,
-            // to allow closing the store
-            currentStoreVersion = -1;
-            currentStoreThread = null;
-        }
     }
 
 
@@ -715,50 +744,6 @@ public final class BTreeWithMVCC {
         }
     }
 
-    private PageChildren readPageChunkReferences(int mapId, long pos, int parentChunk) {
-        if (DataUtils.getPageType(pos) == DataUtils.PAGE_TYPE_LEAF) {
-            return null;
-        }
-        PageChildren r;
-        if (cacheChunkRef != null) {
-            r = cacheChunkRef.get(pos);
-        } else {
-            r = null;
-        }
-        if (r == null) {
-            // 先从缓存中读取page
-            if (cache != null) {
-                Page p = cache.get(pos);
-                if (p != null) {
-                    r = new PageChildren(p);
-                }
-            }
-            if (r == null) {
-                // 没有，通过position从磁盘读取
-                Chunk c = getChunk(pos);
-                long filePos = c.block * BLOCK_SIZE;
-                filePos += DataUtils.getPageOffset(pos);
-                if (filePos < 0) {
-                    throw DataUtils.newIllegalStateException(
-                            DataUtils.ERROR_FILE_CORRUPT,
-                            "Negative position {0}; p={1}, c={2}", filePos, pos, c.toString());
-                }
-                long maxPos = (c.block + c.len) * BLOCK_SIZE;
-                r = PageChildren.read(fileStore, pos, mapId, filePos, maxPos);
-            }
-            r.removeDuplicateChunkReferences();
-            if (cacheChunkRef != null) {
-                cacheChunkRef.put(pos, r, r.getMemory());
-            }
-        }
-        if (r.children.length == 0) {
-            int chunk = DataUtils.getPageChunkId(pos);
-            if (chunk == parentChunk) {
-                return null;
-            }
-        }
-        return r;
-    }
 
     void removePage(MVMap<?, ?> map, long pos, int memory) {
         // 如果这个page还没有被持久化，那么作为旧版本临时保存
