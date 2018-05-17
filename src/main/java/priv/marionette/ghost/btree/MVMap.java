@@ -93,9 +93,6 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return "map." + Integer.toHexString(mapId);
     }
 
-    /**
-     * Initialize this map.
-     */
     protected void init() {}
 
     public Page createEmptyLeaf() {
@@ -187,6 +184,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
                         if (index < 0) {
                             p.insertLeaf(-index - 1, key, value);
                             int keyCount;
+                            //如果节点keys的数量超过了bp树的(阶数-1),或者单个page的占用内存超标则自顶向下分裂
                             while ((keyCount = p.getKeyCount()) > bTree.getKeysPerPage()
                                     || p.getMemory() > bTree.getMaxPageSize()
                                     && keyCount > (p.isLeaf() ? 1 : 2)) {
@@ -271,6 +269,26 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return success;
     }
 
+    /**
+     * 自顶向下搜索
+     * @param p
+     * @param key
+     * @return
+     */
+    private static CursorPos traverseDown(Page p, Object key) {
+        CursorPos pos = null;
+        while (!p.isLeaf()) {
+            assert p.getKeyCount() > 0;
+            int index = p.binarySearch(key) + 1;
+            if (index < 0) {
+                index = -index;
+            }
+            pos = new CursorPos(p, index, pos);
+            p = p.getChildPage(index);
+        }
+        return new CursorPos(p, p.binarySearch(key), pos);
+    }
+
     private boolean lockRoot(RootReference rootReference) {
         return !rootReference.lockedForUpdate
                 && root.compareAndSet(rootReference, new RootReference(rootReference));
@@ -283,6 +301,49 @@ public class MVMap<K,V> extends AbstractMap<K, V>
             RootReference updatedRootReference = new RootReference(rootReference, newRoot, attempt);
             success = root.compareAndSet(rootReference, updatedRootReference);
         } while(!success);
+    }
+
+    /**
+     * 更新root的引用信息至最新版本
+     * @param oldRoot
+     * @param newRoot
+     * @param attemptUpdateCounter
+     * @return
+     */
+    protected final boolean updateRoot(RootReference oldRoot, Page newRoot, int attemptUpdateCounter) {
+        return setNewRoot(oldRoot, newRoot, attemptUpdateCounter, true) != null;
+    }
+
+    private RootReference setNewRoot(RootReference oldRoot, Page newRootPage,
+                                     int attemptUpdateCounter, boolean obeyLock) {
+        RootReference currentRoot = getRoot();
+        assert newRootPage != null || currentRoot != null;
+        if (currentRoot != oldRoot && oldRoot != null) {
+            return null;
+        }
+
+        RootReference previous = currentRoot;
+        long updateCounter = 1;
+        long newVersion = INITIAL_VERSION;
+        if(currentRoot != null) {
+            if (obeyLock && currentRoot.lockedForUpdate) {
+                return null;
+            }
+
+            if (newRootPage == null) {
+                newRootPage = currentRoot.root;
+            }
+
+            newVersion = currentRoot.version;
+            previous = currentRoot.previous;
+            updateCounter += currentRoot.updateCounter;
+            attemptUpdateCounter += currentRoot.updateAttemptCounter;
+        }
+
+        RootReference updatedRootReference = new RootReference(newRootPage, newVersion, previous, updateCounter,
+                attemptUpdateCounter, false);
+        boolean success = root.compareAndSet(currentRoot, updatedRootReference);
+        return success ? updatedRootReference : null;
     }
 
     public final RootReference getRoot() {
@@ -336,8 +397,11 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         bTree.removePage(this, pos, memory);
     }
 
-    public long getVersion() {
-        return root.getVersion();
+    public final long getVersion() {
+        RootReference rootReference = getRoot();
+        RootReference previous = rootReference.previous;
+        return previous == null || previous.root != rootReference.root ?
+                rootReference.version : previous.version;
     }
 
     public boolean isClosed() {
@@ -352,8 +416,24 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return valueType;
     }
 
-    void setWriteVersion(long writeVersion) {
-        this.writeVersion = writeVersion;
+    final RootReference setWriteVersion(long writeVersion) {
+        int attempt = 0;
+        while(true) {
+            RootReference rootReference = getRoot();
+            if(rootReference.version >= writeVersion) {
+                return rootReference;
+            } else if (isClosed()) {
+                if (rootReference.version < bTree.getOldestVersionToKeep()) {
+                    return null;
+                }
+                return rootReference;
+            }
+            RootReference updatedRootReference = new RootReference(rootReference, writeVersion, ++attempt);
+            if(root.compareAndSet(rootReference, updatedRootReference)) {
+                removeUnusedOldVersions(updatedRootReference);
+                return updatedRootReference;
+            }
+        }
     }
 
     void setRootPos(long rootPos, long version) {

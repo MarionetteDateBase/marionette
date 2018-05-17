@@ -301,6 +301,14 @@ public final class BTreeWithMVCC {
         return fileStore;
     }
 
+    public int getKeysPerPage() {
+        return keysPerPage;
+    }
+
+    public long getMaxPageSize() {
+        return cache == null ? Long.MAX_VALUE : cache.getMaxItemSize() >> 4;
+    }
+
 
     public void registerUnsavedPage(int memory) {
         unsavedMemory += memory;

@@ -1,7 +1,7 @@
 package priv.marionette.ghost.btree;
 
 /**
- * 迭代器中page的引用信息
+ * BP树迭代器
  *
  * @author Yue Yu
  * @create 2018-04-10 下午12:51
