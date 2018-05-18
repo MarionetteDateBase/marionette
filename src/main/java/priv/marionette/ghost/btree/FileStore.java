@@ -169,6 +169,9 @@ public class FileStore {
         }
     }
 
+    public long predictAllocation(int length) {
+        return freeSpace.predictAllocation(length);
+    }
 
     /**
      * 关闭文件IO流，释放文件锁

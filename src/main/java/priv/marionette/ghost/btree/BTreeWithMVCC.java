@@ -7,6 +7,7 @@ import priv.marionette.compress.Compressor;
 import priv.marionette.engine.Constants;
 import priv.marionette.ghost.*;
 import priv.marionette.tools.DataUtils;
+import priv.marionette.tools.MathUtils;
 import priv.marionette.tools.New;
 import static priv.marionette.ghost.btree.MVMap.INITIAL_VERSION;
 
@@ -73,9 +74,10 @@ public final class BTreeWithMVCC {
     private long updateCounter = 0;
     private long updateAttemptCounter = 0;
 
-    private final ConcurrentHashMap<Long,
-            ConcurrentHashMap<Integer, Chunk>> freedPageSpace =
-            new ConcurrentHashMap<>();
+    /**
+     * 记录被回收的freed chunks
+     */
+    private final Map<Integer, Chunk> freedPageSpace = new HashMap<>();
 
     private final MVMap<String, String> meta;
 
@@ -640,10 +642,6 @@ public final class BTreeWithMVCC {
         long storeVersion = currentStoreVersion;
         long version = ++currentVersion;
         lastCommitTime = time;
-
-        // the metadata of the last chunk was not stored so far, and needs to be
-        // set now (it's better not to update right after storing, because that
-        // would modify the meta map again)
         int lastChunkId;
         if (lastChunk == null) {
             lastChunkId = 0;
@@ -651,7 +649,6 @@ public final class BTreeWithMVCC {
             lastChunkId = lastChunk.id;
             meta.put(Chunk.getMetaKey(lastChunkId), lastChunk.asString());
             markMetaChanged();
-            // never go backward in time
             time = Math.max(lastChunk.time, time);
         }
         int newChunkId = lastChunkId;
@@ -738,7 +735,7 @@ public final class BTreeWithMVCC {
 
         int chunkLength = buff.position();
 
-        // add the store header and round to the next block
+        // 将limit设置到下一个block位置
         int length = MathUtils.roundUpInt(chunkLength +
                 Chunk.FOOTER_LENGTH, BLOCK_SIZE);
         buff.limit(length);
@@ -749,11 +746,10 @@ public final class BTreeWithMVCC {
         assert fileStore.getFileLengthInUse() == measureFileLengthInUse() :
                 fileStore.getFileLengthInUse() + " != " + measureFileLengthInUse() + " " + c;
         c.metaRootPos = metaRoot.getPos();
-        // calculate and set the likely next position
+        //对下一个chunk的位置做预分配
         if (reuseSpace) {
             c.next = fileStore.predictAllocation(c.len * BLOCK_SIZE) / BLOCK_SIZE;
         } else {
-            // just after this chunk
             c.next = 0;
         }
         buff.position(0);
@@ -825,6 +821,87 @@ public final class BTreeWithMVCC {
         lastStoredVersion = storeVersion;
     }
 
+    private long allocateFileSpace(int length, boolean atTheEnd) {
+        long filePos;
+        if (atTheEnd) {
+            filePos = getFileLengthInUse();
+            fileStore.markUsed(filePos, length);
+        } else {
+            filePos = fileStore.allocate(length);
+        }
+        return filePos;
+    }
+
+    private long measureFileLengthInUse() {
+        long size = 2;
+        for (Chunk c : chunks.values()) {
+            if (c.len != Integer.MAX_VALUE) {
+                size = Math.max(size, c.block + c.len);
+            }
+        }
+        return size * BLOCK_SIZE;
+    }
+
+    /**
+     * 取回被回收的可用空间
+     */
+    private void applyFreedSpace() {
+        while (true) {
+            ArrayList<Chunk> modified = new ArrayList<>();
+            synchronized (freedPageSpace) {
+                for (Chunk f : freedPageSpace.values()) {
+                    Chunk c = chunks.get(f.id);
+                    if (c != null) {
+                        c.maxLenLive += f.maxLenLive;
+                        c.pageCountLive += f.pageCountLive;
+                        if (c.pageCountLive < 0 && c.pageCountLive > -MARKED_FREE) {
+                            c.pageCountLive = 0;
+                        }
+                        if (c.maxLenLive < 0 && c.maxLenLive > -MARKED_FREE) {
+                            c.maxLenLive = 0;
+                        }
+                        modified.add(c);
+                    }
+                }
+                freedPageSpace.clear();
+            }
+            for (Chunk c : modified) {
+                meta.put(Chunk.getMetaKey(c.id), c.asString());
+            }
+            if (modified.isEmpty()) {
+                break;
+            }
+            markMetaChanged();
+        }
+    }
+
+
+    private void onVersionChange(long version) {
+        TxCounter txCounter = this.currentTxCounter;
+        assert txCounter.counter.get() >= 0;
+        versions.add(txCounter);
+        currentTxCounter = new TxCounter(version);
+        txCounter.counter.decrementAndGet();
+        dropUnusedVersions();
+    }
+
+    private void dropUnusedVersions() {
+        TxCounter txCounter;
+        while ((txCounter = versions.peek()) != null
+                && txCounter.counter.get() < 0) {
+            versions.poll();
+        }
+        setOldestVersionToKeep(txCounter != null ? txCounter.version : currentTxCounter.version);
+    }
+
+    private void setOldestVersionToKeep(long oldestVersionToKeep) {
+        boolean success;
+        do {
+            long current = this.oldestVersionToKeep.get();
+            success = oldestVersionToKeep <= current ||
+                    this.oldestVersionToKeep.compareAndSet(current, oldestVersionToKeep);
+        } while (!success);
+    }
 
 
     private void freeUnusedIfNeeded(long time) {
@@ -878,68 +955,48 @@ public final class BTreeWithMVCC {
                 return false;
             }
         }
-        Chunk r = retainChunk;
-        if (r != null && c.version > r.version) {
-            return false;
-        }
         return true;
     }
 
     private Set<Integer> collectReferencedChunks() {
-        long testVersion = lastChunk.version;
-        DataUtils.checkArgument(testVersion > 0, "Collect references on version 0");
-        long readCount = getFileStore().readCount.get();
-        Set<Integer> referenced = new HashSet<>();
-        for (Cursor<String, String> c = meta.cursor("root."); c.hasNext();) {
-            String key = c.next();
-            if (!key.startsWith("root.")) {
-                break;
-            }
-            long pos = DataUtils.parseHexLong(c.getValue());
-            if (pos == 0) {
-                continue;
-            }
-            int mapId = DataUtils.parseHexInt(key.substring("root.".length()));
-            collectReferencedChunks(referenced, mapId, pos, 0);
-        }
+        ChunkIdsCollector collector = new ChunkIdsCollector(meta.getId());
+        Set<Long> inspectedRoots = new HashSet<>();
         long pos = lastChunk.metaRootPos;
-        collectReferencedChunks(referenced, 0, pos, 0);
-        readCount = fileStore.readCount.get() - readCount;
-        return referenced;
+        inspectedRoots.add(pos);
+        collector.visit(pos);
+        long oldestVersionToKeep = getOldestVersionToKeep();
+        MVMap.RootReference rootReference = meta.getRoot();
+        do {
+            Page rootPage = rootReference.root;
+            pos = rootPage.getPos();
+            if (!rootPage.isSaved()) {
+                collector.setMapId(meta.getId());
+                collector.visit(rootPage);
+            } else if(inspectedRoots.add(pos)) {
+                collector.setMapId(meta.getId());
+                collector.visit(pos);
+            }
+
+            for (Cursor<String, String> c = new Cursor<>(rootPage, "root."); c.hasNext(); ) {
+                String key = c.next();
+                assert key != null;
+                if (!key.startsWith("root.")) {
+                    break;
+                }
+                pos = DataUtils.parseHexLong(c.getValue());
+                if (DataUtils.isPageSaved(pos) && inspectedRoots.add(pos)) {
+                    // to allow for something like "root.tmp.123" to be processed
+                    int mapId = DataUtils.parseHexInt(key.substring(key.lastIndexOf('.') + 1));
+                    collector.setMapId(mapId);
+                    collector.visit(pos);
+                }
+            }
+        } while(rootReference.version >= oldestVersionToKeep &&
+                (rootReference = rootReference.previous) != null);
+        return collector.getReferenced();
     }
 
 
-    private void collectReferencedChunks(Set<Integer> targetChunkSet,
-                                         int mapId, long pos, int level) {
-        int c = DataUtils.getPageChunkId(pos);
-        targetChunkSet.add(c);
-        if (DataUtils.getPageType(pos) == DataUtils.PAGE_TYPE_LEAF) {
-            return;
-        }
-        PageChildren refs = readPageChunkReferences(mapId, pos, -1);
-        if (!refs.chunkList) {
-            Set<Integer> target = new HashSet<>();
-            for (int i = 0; i < refs.children.length; i++) {
-                long p = refs.children[i];
-                collectReferencedChunks(target, mapId, p, level + 1);
-            }
-            target.remove(c);
-            long[] children = new long[target.size()];
-            int i = 0;
-            for (Integer p : target) {
-                children[i++] = DataUtils.getPagePos(p, 0, 0,
-                        DataUtils.PAGE_TYPE_LEAF);
-            }
-            refs.children = children;
-            refs.chunkList = true;
-            if (cacheChunkRef != null) {
-                cacheChunkRef.put(refs.pos, refs, refs.getMemory());
-            }
-        }
-        for (long p : refs.children) {
-            targetChunkSet.add(DataUtils.getPageChunkId(p));
-        }
-    }
 
 
     void removePage(MVMap<?, ?> map, long pos, int memory) {

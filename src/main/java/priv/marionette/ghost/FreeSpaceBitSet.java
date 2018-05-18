@@ -69,19 +69,30 @@ public class FreeSpaceBitSet {
         return true;
     }
 
+    public long allocate(int length) {
+        return allocate(length, true);
+    }
+
+    public long predictAllocation(int length) {
+        return allocate(length, false);
+    }
 
     /**
      * 分配区块空间并标记正在使用
      * @param length
      * @return
      */
-    public long allocate(int length) {
+    private long allocate(int length, boolean allocate) {
         int blocks = getBlockCount(length);
         for (int i = 0;;) {
             int start = set.nextClearBit(i);
             int end = set.nextSetBit(start + 1);
             if (end < 0 || end - start >= blocks) {
-                set.set(start, start + blocks);
+                assert set.nextSetBit(start) == -1 || set.nextSetBit(start) >= start + blocks :
+                        "Double alloc: " + Integer.toHexString(start) + "/" + Integer.toHexString(blocks) + " " + this;
+                if (allocate) {
+                    set.set(start, start + blocks);
+                }
                 return getPos(start);
             }
             i = end;
