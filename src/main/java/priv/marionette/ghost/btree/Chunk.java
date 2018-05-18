@@ -185,21 +185,18 @@ public class Chunk {
     }
 
 
-    public void wirteChunkHeader(WriteBuffer buffer, int minLength){
-        long pos = buffer.position();
-        buffer.put(asString().getBytes(StandardCharsets.ISO_8859_1));
-        // 如果header长度不够则填充空白字符
-        while (buffer.position() - pos < minLength - 1) {
-            buffer.put((byte) ' ');
+    void writeChunkHeader(WriteBuffer buff, int minLength) {
+        long pos = buff.position();
+        buff.put(asString().getBytes(StandardCharsets.ISO_8859_1));
+        while (buff.position() - pos < minLength - 1) {
+            buff.put((byte) ' ');
         }
-        // 如果header长度超过限制则抛出异常
-        if (minLength != 0 && buffer.position() > minLength) {
+        if (minLength != 0 && buff.position() > minLength) {
             throw DataUtils.newIllegalStateException(
                     DataUtils.ERROR_INTERNAL,
-                    "Chunk header is too long");
+                    "Chunk metadata too long");
         }
-        buffer.put((byte) '\n');
-
+        buff.put((byte) '\n');
     }
 
 

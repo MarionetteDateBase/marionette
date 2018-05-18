@@ -38,10 +38,6 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     private final DataType keyType;
     private final DataType valueType;
 
-    /**
-     * Whether the map is closed. Volatile so we don't accidentally write to a
-     * closed map in multithreaded mode.
-     */
     private volatile  boolean closed;
     private boolean readOnly;
     private boolean isVolatile;
@@ -623,9 +619,9 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return false;
     }
 
-
-
-
+    public final boolean isVolatile() {
+        return isVolatile;
+    }
 
     /**
      * 根据指定的key替换value
