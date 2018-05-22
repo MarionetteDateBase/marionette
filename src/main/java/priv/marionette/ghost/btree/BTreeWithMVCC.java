@@ -1488,7 +1488,7 @@ public final class BTreeWithMVCC {
             }
             long maxPos = (c.block + c.len) * BLOCK_SIZE;
             p = Page.read(fileStore, pos, map, filePos, maxPos);
-            cachePage(pos, p, p.getMemory());
+            cachePage(p);
         }
         return p;
     }
@@ -1533,21 +1533,15 @@ public final class BTreeWithMVCC {
     void writeInBackground() {
 
         try {
-            long time = getTimeSinceCreation();
-
-            if (time <= lastCommitTime + autoCommitDelay) {
+            if (closed) {
                 return;
             }
 
-            if (hasUnsavedChanges()) {
-                try {
-                    commitAndSave();
-                } catch (Throwable e) {
-                    handleException(e);
-                    return;
-                }
+            long time = getTimeSinceCreation();
+            if (time <= lastCommitTime + autoCommitDelay) {
+                return;
             }
-
+            tryCommit();
             if (autoCompactFillRate > 0) {
                 boolean fileOps;
                 long fileOpCount = fileStore.getWriteCount() + fileStore.getReadCount();
@@ -1556,13 +1550,11 @@ public final class BTreeWithMVCC {
                 } else {
                     fileOps = false;
                 }
-                // 如果有任何文件操作，执行一个较低的fill rate
-                int fillRate = fileOps ? autoCompactFillRate / 3 : autoCompactFillRate;
-                compact(fillRate, autoCommitMemory);
+                int targetFillRate = fileOps ? autoCompactFillRate / 3 : autoCompactFillRate;
+                compact(targetFillRate, autoCommitMemory);
                 autoCompactLastFileOpCount = fileStore.getWriteCount() + fileStore.getReadCount();
             }
-
-        }catch (Throwable e){
+        } catch (Throwable e) {
             handleException(e);
         }
 
@@ -1593,7 +1585,7 @@ public final class BTreeWithMVCC {
         }
     }
 
-    private void compactRewrite(ArrayList<Chunk> old) {
+    private void compactRewrite(Iterable<Chunk> old) {
         HashSet<Integer> set = new HashSet<>();
         for (Chunk c : old) {
             set.add(c.id);
@@ -1601,15 +1593,13 @@ public final class BTreeWithMVCC {
         for (MVMap<?, ?> m : maps.values()) {
             @SuppressWarnings("unchecked")
             MVMap<Object, Object> map = (MVMap<Object, Object>) m;
-            if (!map.rewrite(set)) {
-                return;
+            if (!map.isClosed()) {
+                map.rewrite(set);
             }
         }
-        if (!meta.rewrite(set)) {
-            return;
-        }
+        meta.rewrite(set);
         freeUnusedChunks();
-        commitAndSave();
+        commit();
     }
 
 
@@ -1711,23 +1701,6 @@ public final class BTreeWithMVCC {
 
     }
 
-    /**
-     * 打开一个磁盘上的旧版本数据
-     * @param version
-     * @param mapId
-     * @param template
-     * @param <T>
-     * @return
-     */
-    @SuppressWarnings("unchecked")
-    <T extends MVMap<?, ?>> T openMapVersion(long version, int mapId,
-                                             MVMap<?, ?> template) {
-        MVMap<String, String> oldMeta = getMetaMap(version);
-        long rootPos = getRootPos(oldMeta, mapId);
-        MVMap<?, ?> m = template.openReadOnly();
-        m.setRootPos(rootPos, version);
-        return (T) m;
-    }
 
     long getRootPos(int mapId, long version) {
         MVMap<String, String> oldMeta = getMetaMap(version);
@@ -1743,8 +1716,7 @@ public final class BTreeWithMVCC {
         Chunk c = getChunkForVersion(version);
         DataUtils.checkArgument(c != null, "Unknown version {0}", version);
         c = readChunkHeader(c.block);
-        MVMap<String, String> oldMeta = meta.openReadOnly();
-        oldMeta.setRootPos(c.metaRootPos, version);
+        MVMap<String, String> oldMeta = meta.openReadOnly(c.metaRootPos, version);
         return oldMeta;
     }
 
