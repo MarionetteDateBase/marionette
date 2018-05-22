@@ -2,7 +2,6 @@ package priv.marionette.ghost.btree;
 
 import priv.marionette.cache.FilePathCache;
 import priv.marionette.ghost.FreeSpaceBitSet;
-import priv.marionette.ghost.btree.BTreeWithMVCC;
 import priv.marionette.shell.FIlePathNio;
 import priv.marionette.shell.FilePath;
 import priv.marionette.shell.FilePathDisk;
