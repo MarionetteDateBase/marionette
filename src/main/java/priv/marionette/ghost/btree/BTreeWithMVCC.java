@@ -1414,14 +1414,18 @@ public final class BTreeWithMVCC {
     }
 
     private void setWriteVersion(long version) {
-        for (MVMap<?, ?> map : maps.values()) {
-            map.setWriteVersion(version);
+        for (Iterator<MVMap<?, ?>> iter = maps.values().iterator(); iter.hasNext(); ) {
+            MVMap<?, ?> map = iter.next();
+            if (map.setWriteVersion(version) == null) {
+                assert map.isClosed();
+                assert map.getVersion() < getOldestVersionToKeep();
+                meta.remove(MVMap.getMapRootKey(map.getId()));
+                markMetaChanged();
+                iter.remove();
+            }
         }
-        MVMap<String, String> m = meta;
-        if (m == null) {
-            checkOpen();
-        }
-        m.setWriteVersion(version);
+        meta.setWriteVersion(version);
+        onVersionChange(version);
     }
 
 

@@ -3,37 +3,22 @@ package priv.marionette.compress;
 import java.nio.ByteBuffer;
 
 /**
- * <p>
- * This class implements the LZF lossless data compression algorithm. LZF is a
- * Lempel-Ziv variant with byte-aligned output, and optimized for speed.
- * </p>
- * <p>
- * Safety/Use Notes:
- * </p>
- * <ul>
- * <li>Each instance should be used by a single thread only.</li>
- * <li>The data buffers should be smaller than 1 GB.</li>
- * <li>For performance reasons, safety checks on expansion are omitted.</li>
- * <li>Invalid compressed data can cause an ArrayIndexOutOfBoundsException.</li>
- * </ul>
- * <p>
- * The LZF compressed format knows literal runs and back-references:
- * </p>
- * <ul>
- * <li>Literal run: directly copy bytes from input to output.</li>
- * <li>Back-reference: copy previous data to output stream, with specified
- * offset from location and length. The length is at least 3 bytes.</li>
- * </ul>
- *<p>
- * The first byte of the compressed stream is the control byte. For literal
- * runs, the highest three bits of the control byte are not set, the the lower
- * bits are the literal run length, and the next bytes are data to copy directly
- * into the output. For back-references, the highest three bits of the control
- * byte are the back-reference length. If all three bits are set, then the
- * back-reference length is stored in the next byte. The lower bits of the
- * control byte combined with the next byte form the offset for the
- * back-reference.
- * </p>
+ * 这个类实现了Apple的LZF算法(无损压缩算法Lempel-Ziv的变体)，时间复杂度优先的算法
+ *
+ * 使用要点：
+ * 1.每个instance并非线程安全的
+ * 2.The data buffers应该小于1GB
+ * 3.出于性能考虑，扩展性的安全检查被忽略
+ * 4.无效的压缩数据将会导致一个ArrayIndexOutOfBoundsException
+ *
+ * LZF的压缩形式有以下两种:
+ * 1.Literal run: 直接将字节码从input拷贝至output
+ * 2.Back-reference: 拷贝当前offset前length长度的字节码至output stream，length至少三个字节长度
+ *
+ * 压缩流的第一个字节是控制字节。
+ * 在常规模式下，控制字节的最高三位置0，非有效位，后五位为常规模式下的stream长度。
+ * 在回朔引用模式下，控制字节的最高三位表示回朔长度，下一个字节表示stream长度。
+ *
  */
 public final class CompressLZF implements Compressor {
 
