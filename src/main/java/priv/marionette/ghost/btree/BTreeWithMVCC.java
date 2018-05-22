@@ -410,9 +410,6 @@ public final class BTreeWithMVCC {
     }
 
 
-
-
-
     private void closeStore(boolean shrinkIfPossible) {
         if (closed) {
             return;
@@ -1000,56 +997,22 @@ public final class BTreeWithMVCC {
 
 
     void removePage(MVMap<?, ?> map, long pos, int memory) {
-        // 如果这个page还没有被持久化，那么作为旧版本临时保存
-        if (pos == 0) {
+        if (!DataUtils.isPageSaved(pos)) {
             unsavedMemory = Math.max(0, unsavedMemory - memory);
             return;
         }
-
-        if (cache != null) {
-            if (DataUtils.getPageType(pos) == DataUtils.PAGE_TYPE_LEAF) {
-                // 只要不是叶子节点就继续暂时保存至cache，因为要让node参与垃圾回收
-                cache.remove(pos);
-            }
-        }
-
-        Chunk c = getChunk(pos);
-        long version = currentVersion;
-        if (map == meta && currentStoreVersion >= 0) {
-            if (Thread.currentThread() == currentStoreThread) {
-                // 如果page在删除的同时，其所属的chunk的对应持久化操作线程在执行持久化，
-                // 那么将被释放的page对应的chunk版本保存下来，以保证chunk的旧版本可用性
-                version = currentStoreVersion;
-            }
-        }
-        registerFreePage(version, c.id,
-                DataUtils.getPageMaxLength(pos), 1);
-    }
-
-    private void registerFreePage(long version, int chunkId,
-                                  long maxLengthLive, int pageCount) {
-        ConcurrentHashMap<Integer, Chunk> freed = freedPageSpace.get(version);
-        if (freed == null) {
-            freed = new ConcurrentHashMap<>();
-            ConcurrentHashMap<Integer, Chunk> f2 = freedPageSpace.putIfAbsent(version,
-                    freed);
-            if (f2 != null) {
-                freed = f2;
-            }
-        }
-        synchronized (freed) {
-            Chunk chunk = freed.get(chunkId);
+        int chunkId = DataUtils.getPageChunkId(pos);
+        synchronized (freedPageSpace) {
+            Chunk chunk = freedPageSpace.get(chunkId);
             if (chunk == null) {
                 chunk = new Chunk(chunkId);
-                Chunk chunk2 = freed.putIfAbsent(chunkId, chunk);
-                if (chunk2 != null) {
-                    chunk = chunk2;
-                }
+                freedPageSpace.put(chunkId, chunk);
             }
-            chunk.maxLenLive -= maxLengthLive;
-            chunk.pageCountLive -= pageCount;
+            chunk.maxLenLive -= DataUtils.getPageMaxLength(pos);
+            chunk.pageCountLive -= 1;
         }
     }
+
 
     private Chunk getChunk(long pos) {
         Chunk c = getChunkIfFound(pos);
@@ -1089,7 +1052,7 @@ public final class BTreeWithMVCC {
         return c;
     }
 
-    private synchronized void readStoreHeader() {
+    private void readStoreHeader() {
         Chunk newest = null;
         boolean validStoreHeader = false;
         // 找到最新版本的chunk读取前两份区块
@@ -1183,47 +1146,80 @@ public final class BTreeWithMVCC {
             }
             newest = test;
         }
-        setLastChunk(newest);
-        loadChunkMeta();
-        // 检查chunk的header和footer来去除由于断电等原因造成的错误写入版本
-        verifyLastChunks();
-        for (Chunk c : chunks.values()) {
-            if (c.pageCountLive == 0) {
-                registerFreePage(currentVersion, c.id, 0, 0);
+        do {
+            setLastChunk(newest);
+            loadChunkMeta();
+            fileStore.clear();
+            for (Chunk c : chunks.values()) {
+                long start = c.block * BLOCK_SIZE;
+                int length = c.len * BLOCK_SIZE;
+                fileStore.markUsed(start, length);
             }
-            long start = c.block * BLOCK_SIZE;
-            int length = c.len * BLOCK_SIZE;
-            fileStore.markUsed(start, length);
+            assert fileStore.getFileLengthInUse() == measureFileLengthInUse() :
+                    fileStore.getFileLengthInUse() + " != " + measureFileLengthInUse();
+        } while((newest = verifyLastChunks()) != null);
+
+        setWriteVersion(currentVersion);
+        if (lastStoredVersion == INITIAL_VERSION) {
+            lastStoredVersion = currentVersion - 1;
         }
+        assert fileStore.getFileLengthInUse() == measureFileLengthInUse() :
+                fileStore.getFileLengthInUse() + " != " + measureFileLengthInUse();
     }
 
-    private void verifyLastChunks() {
-        long time = getTimeSinceCreation();
-        ArrayList<Integer> ids = new ArrayList<>(chunks.keySet());
-        Collections.sort(ids);
+    private Chunk verifyLastChunks() {
+        assert lastChunk == null || chunks.containsKey(lastChunk.id) : lastChunk;
+        BitSet validIds = new BitSet();
+        Queue<Chunk> queue = new PriorityQueue<>(chunks.size(), new Comparator<Chunk>() {
+            @Override
+            public int compare(Chunk one, Chunk two) {
+                return Integer.compare(one.id, two.id);
+            }
+        });
+        queue.addAll(chunks.values());
         int newestValidChunk = -1;
-        Chunk old = null;
-        for (Integer chunkId : ids) {
-            Chunk c = chunks.get(chunkId);
-            if (old != null && c.time < old.time) {
-                break;
-            }
-            old = c;
-            if (c.time + retentionTime < time) {
-                newestValidChunk = c.id;
-                continue;
-            }
+        Chunk c;
+        while((c = queue.poll()) != null) {
             Chunk test = readChunkHeaderAndFooter(c.block);
             if (test == null || test.id != c.id) {
-                break;
+                continue;
             }
-            newestValidChunk = chunkId;
+            validIds.set(c.id);
+
+            try {
+                MVMap<String, String> oldMeta = meta.openReadOnly(c.metaRootPos, c.version);
+                boolean valid = true;
+                for(Iterator<String> iter = oldMeta.keyIterator("chunk."); valid && iter.hasNext(); ) {
+                    String s = iter.next();
+                    if (!s.startsWith("chunk.")) {
+                        break;
+                    }
+                    s = oldMeta.get(s);
+                    valid = validIds.get(Chunk.fromString(s).id);
+                }
+                if (valid) {
+                    newestValidChunk = c.id;
+                }
+            } catch (Exception ignore) {/**/}
         }
+
         Chunk newest = chunks.get(newestValidChunk);
         if (newest != lastChunk) {
-            //回滚至正确的情况下最新的数据版本
-            rollbackTo(newest == null ? 0 : newest.version);
+            if (newest == null) {
+                rollbackTo(0);
+            } else {
+                rollbackTo(newest.version);
+                return newest;
+            }
         }
+        return  null;
+    }
+
+    /**
+     * 回滚至当前版本的初始状态，忽略所有未提交的更改
+     */
+    public void rollback() {
+        rollbackTo(currentVersion);
     }
 
     /**
@@ -1339,20 +1335,6 @@ public final class BTreeWithMVCC {
             buff = new WriteBuffer();
         }
         return buff;
-    }
-
-    private void revertTemp(long storeVersion) {
-        for (Iterator<Map.Entry<Long, ConcurrentHashMap<Integer, Chunk>>> it =
-             freedPageSpace.entrySet().iterator(); it.hasNext(); ) {
-            Map.Entry<Long, ConcurrentHashMap<Integer, Chunk>> entry = it.next();
-            Long v = entry.getKey();
-            if (v <= storeVersion) {
-                it.remove();
-            }
-        }
-        for (MVMap<?, ?> m : maps.values()) {
-            m.removeUnusedOldVersions();
-        }
     }
 
 
