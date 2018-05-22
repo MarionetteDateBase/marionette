@@ -1233,16 +1233,21 @@ public final class BTreeWithMVCC {
             for (MVMap<?, ?> m : maps.values()) {
                 m.close();
             }
-            meta.clear();
+            meta.setInitialRoot(meta.createEmptyLeaf(), INITIAL_VERSION);
             chunks.clear();
             if (fileStore != null) {
                 fileStore.clear();
             }
             maps.clear();
-            freedPageSpace.clear();
+            lastChunk = null;
+            synchronized (freedPageSpace) {
+                freedPageSpace.clear();
+            }
+            versions.clear();
             currentVersion = version;
             setWriteVersion(version);
-            metaChanged = false;
+            metaChanged =  false;
+            lastStoredVersion = INITIAL_VERSION;
             return;
         }
         DataUtils.checkArgument(
@@ -1251,16 +1256,16 @@ public final class BTreeWithMVCC {
         for (MVMap<?, ?> m : maps.values()) {
             m.rollbackTo(version);
         }
-        for (long v = currentVersion; v >= version; v--) {
-            if (freedPageSpace.size() == 0) {
-                break;
-            }
-            freedPageSpace.remove(v);
+        TxCounter txCounter;
+        while ((txCounter = versions.peekLast()) != null && txCounter.version >= version) {
+            versions.removeLast();
         }
+        currentTxCounter = new TxCounter(version);
+
         meta.rollbackTo(version);
         metaChanged = false;
         boolean loadFromFile = false;
-        // 查找哪些chunk需要被删除
+        // 查询需要移除的chunk和需要获取的最近版本对应的chunk
         ArrayList<Integer> remove = new ArrayList<>();
         Chunk keep = null;
         for (Chunk c : chunks.values()) {
@@ -1271,20 +1276,18 @@ public final class BTreeWithMVCC {
             }
         }
         if (!remove.isEmpty()) {
-            // 最年轻的版本最先释放
             Collections.sort(remove, Collections.reverseOrder());
-            //垃圾回收器中去除废弃版本的chunk
-            revertTemp(version);
             loadFromFile = true;
             for (int id : remove) {
                 Chunk c = chunks.remove(id);
                 long start = c.block * BLOCK_SIZE;
                 int length = c.len * BLOCK_SIZE;
+                //向bitset注册被释放的空间
                 fileStore.free(start, length);
-                // 重写磁盘指定区域
+                assert fileStore.getFileLengthInUse() == measureFileLengthInUse() :
+                        fileStore.getFileLengthInUse() + " != " + measureFileLengthInUse();
                 WriteBuffer buff = getWriteBuffer();
                 buff.limit(length);
-                //重置数据
                 Arrays.fill(buff.getBuffer().array(), (byte) 0);
                 write(start, buff.getBuffer());
                 releaseWriteBuffer(buff);
@@ -1301,18 +1304,16 @@ public final class BTreeWithMVCC {
                 maps.remove(id);
             } else {
                 if (loadFromFile) {
-                    m.setRootPos(getRootPos(meta, id), -1);
+                    m.setRootPos(getRootPos(meta, id), version);
+                } else {
+                    m.rollbackRoot(version);
                 }
             }
         }
-        // rollback might have rolled back the stored chunk metadata as well
-        if (lastChunk != null) {
-            for (Chunk c : chunks.values()) {
-                meta.put(Chunk.getMetaKey(c.id), c.asString());
-            }
-        }
         currentVersion = version;
-        setWriteVersion(version);
+        if (lastStoredVersion == INITIAL_VERSION) {
+            lastStoredVersion = currentVersion - 1;
+        }
     }
 
     private void releaseWriteBuffer(WriteBuffer buff) {
