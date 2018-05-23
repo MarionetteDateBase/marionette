@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 
 /**
- * 以B树为单位，以MVCC作为并发控制的<K,V>式数据存储
+ * 以B树为单位，以MVCC作为并发控制的<K,V>式数据存储的森林
  *
  * @author Yue Yu
  * @create 2018-03-13 下午4:06
@@ -1789,7 +1789,7 @@ public final class BTreeForest {
                         childCollector.visit(page.getChildPagePos(i));
                     }
                 }
-                // and cache resulting set of chunk ids
+                // chunk缓存
                 if (DataUtils.isPageSaved(pos) && cacheChunkRef != null) {
                     int[] chunkIds = childCollector.getChunkIds();
                     cacheChunkRef.put(pos, chunkIds, Constants.MEMORY_ARRAY + 4 * chunkIds.length);
@@ -1805,7 +1805,7 @@ public final class BTreeForest {
             if (DataUtils.getPageType(pos) != DataUtils.PAGE_TYPE_LEAF) {
                 int chunkIds[];
                 if (cacheChunkRef != null && (chunkIds = cacheChunkRef.get(pos)) != null) {
-                    // there is a cached set of chunk ids for this position
+                    // 先从缓存中取chunk
                     for (int chunkId : chunkIds) {
                         register(chunkId);
                     }
@@ -1813,10 +1813,10 @@ public final class BTreeForest {
                     ChunkIdsCollector childCollector = getChild();
                     Page page;
                     if (cache != null && (page = cache.get(pos)) != null) {
-                        // there is a full page in cache, use it
+                        // 从缓存中取page
                         childCollector.visit(page);
                     } else {
-                        // page was not cached: read the data
+                        // 缓存中没有page，read page
                         Chunk chunk = getChunk(pos);
                         long filePos = chunk.block * BLOCK_SIZE;
                         filePos += DataUtils.getPageOffset(pos);
@@ -1828,7 +1828,6 @@ public final class BTreeForest {
                         long maxPos = (chunk.block + chunk.len) * BLOCK_SIZE;
                         Page.readChildrenPositions(fileStore, pos, filePos, maxPos, childCollector);
                     }
-                    // and cache resulting set of chunk ids
                     if (cacheChunkRef != null) {
                         chunkIds = childCollector.getChunkIds();
                         cacheChunkRef.put(pos, chunkIds, Constants.MEMORY_ARRAY + 4 * chunkIds.length);
@@ -1921,8 +1920,6 @@ public final class BTreeForest {
         return openMap(name, new MVBTreeMap.Builder<K, V>());
     }
 
-
-
     public synchronized <M extends MVBTreeMap<K, V>, K, V> M openMap(
             String name, MVBTreeMap.MapBuilder<M, K, V> builder) {
         int id = getMapId(name);
@@ -2014,14 +2011,7 @@ public final class BTreeForest {
         }
 
         /**
-         * Set the size of the write buffer, in KB disk space (for file-based
-         * stores). Unless auto-commit is disabled, changes are automatically
-         * saved if there are more than this amount of changes.
-         * <p>
-         * The default is 1024 KB.
-         * <p>
-         * When the value is set to 0 or lower, data is not automatically
-         * stored.
+         * 设置内存更改量触发持久化的阀值
          *
          * @param kb the write buffer size, in kilobytes
          * @return this
@@ -2185,7 +2175,7 @@ public final class BTreeForest {
         }
 
         /**
-         * Open the store.
+         * 打开一个森林实例
          *
          * @return the opened store
          */
@@ -2199,14 +2189,13 @@ public final class BTreeForest {
         }
 
         /**
-         * Read the configuration from a string.
+         * 从文本编码读取一个config实例
          *
          * @param s the string representation
          * @return the builder
          */
         @SuppressWarnings({ "unchecked", "rawtypes" })
         public static Builder fromString(String s) {
-            // Cast from HashMap<String, String> to HashMap<String, Object> is safe
             return new Builder((HashMap) DataUtils.parseMap(s));
         }
     }
