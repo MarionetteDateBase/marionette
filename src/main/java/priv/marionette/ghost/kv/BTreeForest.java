@@ -218,7 +218,7 @@ public final class BTreeForest {
         if (this.fileStore != null) {
             retentionTime = this.fileStore.getDefaultRetentionTime();
             int kb = DataUtils.getConfigParam(config, "autoCommitBufferSize", 1024);
-            // 19 KB memory is about 1 KB storage
+            // 内存与持久化字节用量为19：1
             autoCommitMemory = kb * 1024 * 19;
             autoCompactFillRate = DataUtils.getConfigParam(config, "autoCompactFillRate", 40);
             char[] encryptionKey = (char[]) config.get("encryptionKey");
@@ -264,8 +264,6 @@ public final class BTreeForest {
                 markMetaChanged();
             }
 
-            // setAutoCommitDelay starts the thread, but only if
-            // the parameter is different from the old value
             int delay = DataUtils.getConfigParam(config, "autoCommitDelay", 1000);
             setAutoCommitDelay(delay);
         } else {
@@ -284,7 +282,6 @@ public final class BTreeForest {
             return;
         }
         stopBackgroundThread();
-        // start the background thread if needed
         if (millis > 0) {
             int sleep = Math.max(1, millis / 10);
             BackgroundWriterThread t =
