@@ -1,6 +1,7 @@
 package priv.marionette.ghost.btree;
 
 import priv.marionette.ghost.type.DataType;
+import priv.marionette.ghost.type.ObjectDataType;
 import priv.marionette.ghost.type.StringDataType;
 import priv.marionette.tools.DataUtils;
 
@@ -964,6 +965,121 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         public void reset() {}
     }
 
+    public interface MapBuilder<M extends MVMap<K, V>, K, V> {
 
+        M create(BTreeWithMVCC bTree, Map<String, Object> config);
+
+        DataType getKeyType();
+
+        DataType getValueType();
+
+        void setKeyType(DataType dataType);
+
+        void setValueType(DataType dataType);
+
+    }
+
+    public abstract static class BasicBuilder<M extends MVMap<K, V>, K, V> implements MapBuilder<M, K, V> {
+
+        private DataType keyType;
+        private DataType valueType;
+
+        protected BasicBuilder() {
+        }
+
+        @Override
+        public DataType getKeyType() {
+            return keyType;
+        }
+
+        @Override
+        public DataType getValueType() {
+            return valueType;
+        }
+
+        @Override
+        public void setKeyType(DataType keyType) {
+            this.keyType = keyType;
+        }
+
+        @Override
+        public void setValueType(DataType valueType) {
+            this.valueType = valueType;
+        }
+
+        public BasicBuilder<M, K, V> keyType(DataType keyType) {
+            this.keyType = keyType;
+            return this;
+        }
+
+        public BasicBuilder<M, K, V> valueType(DataType valueType) {
+            this.valueType = valueType;
+            return this;
+        }
+
+        @Override
+        public M create(BTreeWithMVCC btree, Map<String, Object> config) {
+            if (getKeyType() == null) {
+                setKeyType(new ObjectDataType());
+            }
+            if (getValueType() == null) {
+                setValueType(new ObjectDataType());
+            }
+            DataType keyType = getKeyType();
+            DataType valueType = getValueType();
+            config.put("store", btree);
+            config.put("key", keyType);
+            config.put("val", valueType);
+            return create(config);
+        }
+
+        protected abstract M create(Map<String, Object> config);
+
+    }
+
+    public static class Builder<K, V> extends BasicBuilder<MVMap<K, V>, K, V> {
+
+        public Builder() {}
+
+        @Override
+        public Builder<K,V> keyType(DataType dataType) {
+            setKeyType(dataType);
+            return this;
+        }
+
+        @Override
+        public Builder<K, V> valueType(DataType dataType) {
+            setValueType(dataType);
+            return this;
+        }
+
+        @Override
+        protected MVMap<K, V> create(Map<String, Object> config) {
+            Object type = config.get("type");
+            if(type == null || type.equals("rtree")) {
+                return new MVMap<>(config);
+            }
+            throw new IllegalArgumentException("Incompatible map type");
+        }
+    }
+
+    protected String asString(String name) {
+        StringBuilder buff = new StringBuilder();
+        if (name != null) {
+            DataUtils.appendMap(buff, "name", name);
+        }
+        if (createVersion != 0) {
+            DataUtils.appendMap(buff, "createVersion", createVersion);
+        }
+        String type = getType();
+        if (type != null) {
+            DataUtils.appendMap(buff, "type", type);
+        }
+        return buff.toString();
+    }
+
+    public String getType() {
+        return null;
+    }
 
 }

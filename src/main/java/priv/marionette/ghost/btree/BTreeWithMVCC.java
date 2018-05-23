@@ -1917,6 +1917,71 @@ public final class BTreeWithMVCC {
     }
 
 
+    public <K, V> MVMap<K, V> openMap(String name) {
+        return openMap(name, new MVMap.Builder<K, V>());
+    }
+
+
+
+    public synchronized <M extends MVMap<K, V>, K, V> M openMap(
+            String name, MVMap.MapBuilder<M, K, V> builder) {
+        int id = getMapId(name);
+        M map;
+        if (id >= 0) {
+            map = openMap(id, builder);
+        } else {
+            HashMap<String, Object> c = new HashMap<>();
+            id = ++lastMapId;
+            c.put("id", id);
+            c.put("createVersion", currentVersion);
+            map = builder.create(this, c);
+            map.init();
+            String x = Integer.toHexString(id);
+            meta.put(MVMap.getMapKey(id), map.asString(name));
+            meta.put("name." + name, x);
+            map.setRootPos(0, lastStoredVersion);
+            markMetaChanged();
+            @SuppressWarnings("unchecked")
+            M existingMap = (M)maps.putIfAbsent(id, map);
+            if(existingMap != null) {
+                map = existingMap;
+            }
+        }
+        return map;
+    }
+
+    private int getMapId(String name) {
+        String m = meta.get("name." + name);
+        return m == null ? -1 : DataUtils.parseHexInt(m);
+    }
+
+    public synchronized <M extends MVMap<K, V>, K, V> M openMap(int id,
+                                                                MVMap.MapBuilder<M, K, V> builder) {
+        @SuppressWarnings("unchecked")
+        M map = (M) getMap(id);
+        if (map == null) {
+            String configAsString = meta.get(MVMap.getMapKey(id));
+            if(configAsString != null) {
+                HashMap<String, Object> config =
+                        new HashMap<String, Object>(DataUtils.parseMap(configAsString));
+                config.put("id", id);
+                map = builder.create(this, config);
+                map.init();
+                long root = getRootPos(meta, id);
+                map.setRootPos(root, lastStoredVersion);
+                maps.put(id, map);
+            }
+        }
+        return map;
+    }
+
+    public <K, V> MVMap<K,V> getMap(int id) {
+        checkOpen();
+        @SuppressWarnings("unchecked")
+        MVMap<K, V> map = (MVMap<K, V>) maps.get(id);
+        return map;
+    }
+
 
     /**
      * 嵌入式应用的构造模式
