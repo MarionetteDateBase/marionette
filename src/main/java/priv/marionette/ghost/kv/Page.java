@@ -1,4 +1,4 @@
-package priv.marionette.ghost.btree;
+package priv.marionette.ghost.kv;
 
 import priv.marionette.compress.Compressor;
 import priv.marionette.ghost.WriteBuffer;
@@ -35,7 +35,7 @@ import static priv.marionette.tools.DataUtils.PAGE_TYPE_LEAF;
 public abstract class Page implements Cloneable{
 
 
-    public  final MVMap<?, ?> map;
+    public  final MVBTreeMap<?, ?> map;
 
     private long pos;
 
@@ -91,16 +91,16 @@ public abstract class Page implements Cloneable{
     private static final PageReference[] SINGLE_EMPTY = { PageReference.EMPTY };
 
 
-    Page(MVMap<?, ?> map) {
+    Page(MVBTreeMap<?, ?> map) {
         this.map = map;
     }
 
-    Page(MVMap<?, ?> map, Page source) {
+    Page(MVBTreeMap<?, ?> map, Page source) {
         this(map, source.keys);
         memory = source.memory;
     }
 
-    Page(MVMap<?, ?> map, Object keys[]) {
+    Page(MVBTreeMap<?, ?> map, Object keys[]) {
         this.map = map;
         this.keys = keys;
     }
@@ -111,7 +111,7 @@ public abstract class Page implements Cloneable{
      * @param map the map
      * @return the new page
      */
-    static Page createEmptyLeaf(MVMap<?, ?> map) {
+    static Page createEmptyLeaf(MVBTreeMap<?, ?> map) {
         Page page = new Leaf(map, EMPTY_OBJECT_ARRAY, EMPTY_OBJECT_ARRAY);
         page.initMemoryAccount(PAGE_LEAF_MEMORY);
         return page;
@@ -122,7 +122,7 @@ public abstract class Page implements Cloneable{
      * @param map
      * @return
      */
-    public static Page createEmptyNode(MVMap<?, ?> map) {
+    public static Page createEmptyNode(MVBTreeMap<?, ?> map) {
         Page page = new NonLeaf(map, EMPTY_OBJECT_ARRAY, SINGLE_EMPTY, 0);
         page.initMemoryAccount(PAGE_NODE_MEMORY +
                 MEMORY_POINTER + PAGE_MEMORY_CHILD); // there is always one child
@@ -140,7 +140,7 @@ public abstract class Page implements Cloneable{
      * @param memory
      * @return
      */
-    public static Page create(MVMap<?, ?> map,
+    public static Page create(MVBTreeMap<?, ?> map,
                               Object[] keys, Object[] values, PageReference[] children,
                               long totalCount, int memory) {
         assert keys != null;
@@ -269,7 +269,7 @@ public abstract class Page implements Cloneable{
      * @param maxPos
      * @return
      */
-    static Page read(FileStore fileStore, long pos, MVMap<?, ?> map,
+    static Page read(FileStore fileStore, long pos, MVBTreeMap<?, ?> map,
                      long filePos, long maxPos) {
         ByteBuffer buff;
         int maxLength = DataUtils.getPageMaxLength(pos);
@@ -372,7 +372,7 @@ public abstract class Page implements Cloneable{
      */
     static void readChildrenPositions(FileStore fileStore, long pos,
                                       long filePos, long maxPos,
-                                      BTreeWithMVCC.ChunkIdsCollector collector) {
+                                      BTreeForest.ChunkIdsCollector collector) {
         ByteBuffer buff;
         int maxLength = DataUtils.getPageMaxLength(pos);
         if (maxLength == DataUtils.PAGE_LARGE) {
@@ -453,7 +453,7 @@ public abstract class Page implements Cloneable{
         int compressStart = buff.position();
         map.getKeyType().write(buff, keys, getKeyCount(), true);
         writeValues(buff);
-        BTreeWithMVCC bTree = map.getBTree();
+        BTreeForest bTree = map.getBTree();
         int expLen = buff.position() - compressStart;
         if (expLen > 16) {
             int compressionLevel = bTree.getCompressionLevel();
@@ -537,7 +537,7 @@ public abstract class Page implements Cloneable{
      * @param map
      * @return
      */
-    abstract Page copy(MVMap<?, ?> map);
+    abstract Page copy(MVBTreeMap<?, ?> map);
 
     /**
      * Create a copy of this page.
@@ -747,16 +747,16 @@ public abstract class Page implements Cloneable{
          */
         private Object values[];
 
-        Leaf(MVMap<?, ?> map) {
+        Leaf(MVBTreeMap<?, ?> map) {
             super(map);
         }
 
-        private Leaf(MVMap<?, ?> map, Leaf source) {
+        private Leaf(MVBTreeMap<?, ?> map, Leaf source) {
             super(map, source);
             this.values = source.values;
         }
 
-        Leaf(MVMap<?, ?> map, Object keys[], Object values[]) {
+        Leaf(MVBTreeMap<?, ?> map, Object keys[], Object values[]) {
             super(map, keys);
             this.values = values;
         }
@@ -767,7 +767,7 @@ public abstract class Page implements Cloneable{
         }
 
         @Override
-        public Page copy(MVMap<?, ?> map) {
+        public Page copy(MVBTreeMap<?, ?> map) {
             return new Leaf(map, this);
         }
 
@@ -951,17 +951,17 @@ public abstract class Page implements Cloneable{
          */
         private long totalCount;
 
-        NonLeaf(MVMap<?, ?> map) {
+        NonLeaf(MVBTreeMap<?, ?> map) {
             super(map);
         }
 
-        private NonLeaf(MVMap<?, ?> map, NonLeaf source, PageReference children[], long totalCount) {
+        private NonLeaf(MVBTreeMap<?, ?> map, NonLeaf source, PageReference children[], long totalCount) {
             super(map, source);
             this.children = children;
             this.totalCount = totalCount;
         }
 
-        NonLeaf(MVMap<?, ?> map, Object keys[], PageReference children[], long totalCount) {
+        NonLeaf(MVBTreeMap<?, ?> map, Object keys[], PageReference children[], long totalCount) {
             super(map, keys);
             this.children = children;
             this.totalCount = totalCount;
@@ -973,7 +973,7 @@ public abstract class Page implements Cloneable{
         }
 
         @Override
-        public Page copy(MVMap<?, ?> map) {
+        public Page copy(MVBTreeMap<?, ?> map) {
             // replace child pages with empty pages
             PageReference[] children = new PageReference[this.children.length];
             Arrays.fill(children, PageReference.EMPTY);

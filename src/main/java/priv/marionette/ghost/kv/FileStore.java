@@ -1,4 +1,4 @@
-package priv.marionette.ghost.btree;
+package priv.marionette.ghost.kv;
 
 import priv.marionette.cache.FilePathCache;
 import priv.marionette.ghost.FreeSpaceBitSet;
@@ -44,7 +44,7 @@ public class FileStore {
     protected final AtomicLong writeBytes = new AtomicLong(0);
 
     protected final FreeSpaceBitSet freeSpace =
-            new FreeSpaceBitSet(2, BTreeWithMVCC.BLOCK_SIZE);
+            new FreeSpaceBitSet(2, BTreeForest.BLOCK_SIZE);
 
 
     /**

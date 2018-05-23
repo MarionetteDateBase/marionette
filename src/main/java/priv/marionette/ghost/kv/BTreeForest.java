@@ -1,4 +1,4 @@
-package priv.marionette.ghost.btree;
+package priv.marionette.ghost.kv;
 
 import priv.marionette.cache.LIRSCache;
 import priv.marionette.compress.CompressDeflate;
@@ -9,7 +9,7 @@ import priv.marionette.ghost.*;
 import priv.marionette.tools.DataUtils;
 import priv.marionette.tools.MathUtils;
 import priv.marionette.tools.New;
-import static priv.marionette.ghost.btree.MVMap.INITIAL_VERSION;
+import static priv.marionette.ghost.kv.MVBTreeMap.INITIAL_VERSION;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * @author Yue Yu
  * @create 2018-03-13 下午4:06
  **/
-public final class BTreeWithMVCC {
+public final class BTreeForest {
 
     /**
      * 区块大小，一个Chunk的有两个header，第二个是第一个header的备份
@@ -79,9 +79,9 @@ public final class BTreeWithMVCC {
      */
     private final Map<Integer, Chunk> freedPageSpace = new HashMap<>();
 
-    private final MVMap<String, String> meta;
+    private final MVBTreeMap<String, String> meta;
 
-    private final ConcurrentHashMap<Integer, MVMap<?, ?>> maps =
+    private final ConcurrentHashMap<Integer, MVBTreeMap<?, ?>> maps =
             new ConcurrentHashMap<>();
 
     private final HashMap<String, Object> storeHeader = new HashMap<>();
@@ -171,7 +171,7 @@ public final class BTreeWithMVCC {
 
 
 
-    BTreeWithMVCC(Map<String, Object> config){
+    BTreeForest(Map<String, Object> config){
         this.compressionLevel = DataUtils.getConfigParam(config, "compress", 0);
         String fileName = (String) config.get("fileName");
         FileStore fileStore = (FileStore) config.get("fileStore");
@@ -213,7 +213,7 @@ public final class BTreeWithMVCC {
         keysPerPage = DataUtils.getConfigParam(config, "keysPerPage", 48);
         backgroundExceptionHandler =
                 (Thread.UncaughtExceptionHandler)config.get("backgroundExceptionHandler");
-        meta = new MVMap<>(this);
+        meta = new MVBTreeMap<>(this);
         meta.init();
         if (this.fileStore != null) {
             retentionTime = this.fileStore.getDefaultRetentionTime();
@@ -300,10 +300,10 @@ public final class BTreeWithMVCC {
      * @param fileName
      * @return
      */
-    public static BTreeWithMVCC open(String fileName) {
+    public static BTreeForest open(String fileName) {
         HashMap<String, Object> config = new HashMap<>();
         config.put("fileName", fileName);
-        return new BTreeWithMVCC(config);
+        return new BTreeForest(config);
     }
 
     public long getCurrentVersion() {
@@ -427,7 +427,7 @@ public final class BTreeWithMVCC {
             if (cacheChunkRef != null) {
                 cacheChunkRef.clear();
             }
-            for (MVMap<?, ?> m : new ArrayList<>(maps.values())) {
+            for (MVBTreeMap<?, ?> m : new ArrayList<>(maps.values())) {
                 //is marked as closed
                 m.close();
             }
@@ -522,9 +522,9 @@ public final class BTreeWithMVCC {
         FileStore f = fileStore;
         if (f != null && !f.isReadOnly()) {
             stopBackgroundThread();
-            for (MVMap<?, ?> map : maps.values()) {
+            for (MVBTreeMap<?, ?> map : maps.values()) {
                 if (map.isClosed()) {
-                    if (meta.remove(MVMap.getMapRootKey(map.getId())) != null) {
+                    if (meta.remove(MVBTreeMap.getMapRootKey(map.getId())) != null) {
                         markMetaChanged();
                     }
                 }
@@ -539,7 +539,7 @@ public final class BTreeWithMVCC {
         if (metaChanged) {
             return true;
         }
-        for (MVMap<?, ?> m : maps.values()) {
+        for (MVBTreeMap<?, ?> m : maps.values()) {
             if (!m.isClosed()) {
                 long v = m.getVersion();
                 if (v >= 0 && v > lastStoredVersion) {
@@ -561,7 +561,7 @@ public final class BTreeWithMVCC {
      * 在写map之前先尝试commit已有的数据
      * @param map
      */
-    void beforeWrite(MVMap<?, ?> map) {
+    void beforeWrite(MVBTreeMap<?, ?> map) {
         if (saveNeeded && fileStore != null && !closed && autoCommitDelay > 0) {
             saveNeeded = false;
             // check again, because it could have been written by now
@@ -680,13 +680,13 @@ public final class BTreeWithMVCC {
         meta.remove(Chunk.getMetaKey(c.id));
         markMetaChanged();
         ArrayList<Page> changed = new ArrayList<>();
-        for (Iterator<MVMap<?, ?>> iter = maps.values().iterator(); iter.hasNext(); ) {
-            MVMap<?, ?> map = iter.next();
-            MVMap.RootReference rootReference = map.setWriteVersion(version);
+        for (Iterator<MVBTreeMap<?, ?>> iter = maps.values().iterator(); iter.hasNext(); ) {
+            MVBTreeMap<?, ?> map = iter.next();
+            MVBTreeMap.RootReference rootReference = map.setWriteVersion(version);
             if (rootReference == null) {
                 assert map.isClosed();
                 assert map.getVersion() < getOldestVersionToKeep();
-                meta.remove(MVMap.getMapRootKey(map.getId()));
+                meta.remove(MVBTreeMap.getMapRootKey(map.getId()));
                 iter.remove();
             } else if (map.getCreateVersion() <= storeVersion && // if map was created after storing started, skip it
                     !map.isVolatile() &&
@@ -711,7 +711,7 @@ public final class BTreeWithMVCC {
         c.maxLen = 0;
         c.maxLenLive = 0;
         for (Page p : changed) {
-            String key = MVMap.getMapRootKey(p.getMapId());
+            String key = MVBTreeMap.getMapRootKey(p.getMapId());
             if (p.getTotalCount() == 0) {
                 meta.remove(key);
             } else {
@@ -721,7 +721,7 @@ public final class BTreeWithMVCC {
             }
         }
         applyFreedSpace();
-        MVMap.RootReference metaRootReference = meta.setWriteVersion(version);
+        MVBTreeMap.RootReference metaRootReference = meta.setWriteVersion(version);
         assert metaRootReference != null;
         assert metaRootReference.version == version : metaRootReference.version + " != " + version;
         metaChanged = false;
@@ -962,7 +962,7 @@ public final class BTreeWithMVCC {
         inspectedRoots.add(pos);
         collector.visit(pos);
         long oldestVersionToKeep = getOldestVersionToKeep();
-        MVMap.RootReference rootReference = meta.getRoot();
+        MVBTreeMap.RootReference rootReference = meta.getRoot();
         do {
             Page rootPage = rootReference.root;
             pos = rootPage.getPos();
@@ -996,7 +996,7 @@ public final class BTreeWithMVCC {
 
 
 
-    void removePage(MVMap<?, ?> map, long pos, int memory) {
+    void removePage(MVBTreeMap<?, ?> map, long pos, int memory) {
         if (!DataUtils.isPageSaved(pos)) {
             unsavedMemory = Math.max(0, unsavedMemory - memory);
             return;
@@ -1187,7 +1187,7 @@ public final class BTreeWithMVCC {
             validIds.set(c.id);
 
             try {
-                MVMap<String, String> oldMeta = meta.openReadOnly(c.metaRootPos, c.version);
+                MVBTreeMap<String, String> oldMeta = meta.openReadOnly(c.metaRootPos, c.version);
                 boolean valid = true;
                 for(Iterator<String> iter = oldMeta.keyIterator("chunk."); valid && iter.hasNext(); ) {
                     String s = iter.next();
@@ -1230,7 +1230,7 @@ public final class BTreeWithMVCC {
     public synchronized void rollbackTo(long version) {
         checkOpen();
         if (version == 0) {
-            for (MVMap<?, ?> m : maps.values()) {
+            for (MVBTreeMap<?, ?> m : maps.values()) {
                 m.close();
             }
             meta.setInitialRoot(meta.createEmptyLeaf(), INITIAL_VERSION);
@@ -1253,7 +1253,7 @@ public final class BTreeWithMVCC {
         DataUtils.checkArgument(
                 isKnownVersion(version),
                 "Unknown version {0}", version);
-        for (MVMap<?, ?> m : maps.values()) {
+        for (MVBTreeMap<?, ?> m : maps.values()) {
             m.rollbackTo(version);
         }
         TxCounter txCounter;
@@ -1297,7 +1297,7 @@ public final class BTreeWithMVCC {
             writeStoreHeader();
             readStoreHeader();
         }
-        for (MVMap<?, ?> m : new ArrayList<>(maps.values())) {
+        for (MVBTreeMap<?, ?> m : new ArrayList<>(maps.values())) {
             int id = m.getId();
             if (m.getCreateVersion() >= version) {
                 m.close();
@@ -1368,7 +1368,7 @@ public final class BTreeWithMVCC {
         if (c == null) {
             return false;
         }
-        MVMap<String, String> oldMeta = getMetaMap(version);
+        MVBTreeMap<String, String> oldMeta = getMetaMap(version);
         if (oldMeta == null) {
             return false;
         }
@@ -1414,12 +1414,12 @@ public final class BTreeWithMVCC {
     }
 
     private void setWriteVersion(long version) {
-        for (Iterator<MVMap<?, ?>> iter = maps.values().iterator(); iter.hasNext(); ) {
-            MVMap<?, ?> map = iter.next();
+        for (Iterator<MVBTreeMap<?, ?>> iter = maps.values().iterator(); iter.hasNext(); ) {
+            MVBTreeMap<?, ?> map = iter.next();
             if (map.setWriteVersion(version) == null) {
                 assert map.isClosed();
                 assert map.getVersion() < getOldestVersionToKeep();
-                meta.remove(MVMap.getMapRootKey(map.getId()));
+                meta.remove(MVBTreeMap.getMapRootKey(map.getId()));
                 markMetaChanged();
                 iter.remove();
             }
@@ -1475,7 +1475,7 @@ public final class BTreeWithMVCC {
         return null;
     }
 
-    Page readPage(MVMap<?, ?> map, long pos) {
+    Page readPage(MVBTreeMap<?, ?> map, long pos) {
         if (pos == 0) {
             throw DataUtils.newIllegalStateException(
                     DataUtils.ERROR_FILE_CORRUPT, "Position 0");
@@ -1594,9 +1594,9 @@ public final class BTreeWithMVCC {
         for (Chunk c : old) {
             set.add(c.id);
         }
-        for (MVMap<?, ?> m : maps.values()) {
+        for (MVBTreeMap<?, ?> m : maps.values()) {
             @SuppressWarnings("unchecked")
-            MVMap<Object, Object> map = (MVMap<Object, Object>) m;
+            MVBTreeMap<Object, Object> map = (MVBTreeMap<Object, Object>) m;
             if (!map.isClosed()) {
                 map.rewrite(set);
             }
@@ -1707,20 +1707,20 @@ public final class BTreeWithMVCC {
 
 
     long getRootPos(int mapId, long version) {
-        MVMap<String, String> oldMeta = getMetaMap(version);
+        MVBTreeMap<String, String> oldMeta = getMetaMap(version);
         return getRootPos(oldMeta, mapId);
     }
 
-    private static long getRootPos(MVMap<String, String> map, int mapId) {
-        String root = map.get(MVMap.getMapRootKey(mapId));
+    private static long getRootPos(MVBTreeMap<String, String> map, int mapId) {
+        String root = map.get(MVBTreeMap.getMapRootKey(mapId));
         return root == null ? 0 : DataUtils.parseHexLong(root);
     }
 
-    private MVMap<String, String> getMetaMap(long version) {
+    private MVBTreeMap<String, String> getMetaMap(long version) {
         Chunk c = getChunkForVersion(version);
         DataUtils.checkArgument(c != null, "Unknown version {0}", version);
         c = readChunkHeader(c.block);
-        MVMap<String, String> oldMeta = meta.openReadOnly(c.metaRootPos, version);
+        MVBTreeMap<String, String> oldMeta = meta.openReadOnly(c.metaRootPos, version);
         return oldMeta;
     }
 
@@ -1885,11 +1885,11 @@ public final class BTreeWithMVCC {
          */
         public final Object sync = new Object();
 
-        private final BTreeWithMVCC bTree;
+        private final BTreeForest bTree;
 
         private final int sleep;
 
-        BackgroundWriterThread(BTreeWithMVCC bTree, int sleep, String fileStoreName) {
+        BackgroundWriterThread(BTreeForest bTree, int sleep, String fileStoreName) {
             super("BTree background writer " + fileStoreName);
             this.bTree = bTree;
             this.sleep = sleep;
@@ -1917,14 +1917,14 @@ public final class BTreeWithMVCC {
     }
 
 
-    public <K, V> MVMap<K, V> openMap(String name) {
-        return openMap(name, new MVMap.Builder<K, V>());
+    public <K, V> MVBTreeMap<K, V> openMap(String name) {
+        return openMap(name, new MVBTreeMap.Builder<K, V>());
     }
 
 
 
-    public synchronized <M extends MVMap<K, V>, K, V> M openMap(
-            String name, MVMap.MapBuilder<M, K, V> builder) {
+    public synchronized <M extends MVBTreeMap<K, V>, K, V> M openMap(
+            String name, MVBTreeMap.MapBuilder<M, K, V> builder) {
         int id = getMapId(name);
         M map;
         if (id >= 0) {
@@ -1937,7 +1937,7 @@ public final class BTreeWithMVCC {
             map = builder.create(this, c);
             map.init();
             String x = Integer.toHexString(id);
-            meta.put(MVMap.getMapKey(id), map.asString(name));
+            meta.put(MVBTreeMap.getMapKey(id), map.asString(name));
             meta.put("name." + name, x);
             map.setRootPos(0, lastStoredVersion);
             markMetaChanged();
@@ -1955,12 +1955,12 @@ public final class BTreeWithMVCC {
         return m == null ? -1 : DataUtils.parseHexInt(m);
     }
 
-    public synchronized <M extends MVMap<K, V>, K, V> M openMap(int id,
-                                                                MVMap.MapBuilder<M, K, V> builder) {
+    public synchronized <M extends MVBTreeMap<K, V>, K, V> M openMap(int id,
+                                                                     MVBTreeMap.MapBuilder<M, K, V> builder) {
         @SuppressWarnings("unchecked")
         M map = (M) getMap(id);
         if (map == null) {
-            String configAsString = meta.get(MVMap.getMapKey(id));
+            String configAsString = meta.get(MVBTreeMap.getMapKey(id));
             if(configAsString != null) {
                 HashMap<String, Object> config =
                         new HashMap<String, Object>(DataUtils.parseMap(configAsString));
@@ -1975,10 +1975,10 @@ public final class BTreeWithMVCC {
         return map;
     }
 
-    public <K, V> MVMap<K,V> getMap(int id) {
+    public <K, V> MVBTreeMap<K,V> getMap(int id) {
         checkOpen();
         @SuppressWarnings("unchecked")
-        MVMap<K, V> map = (MVMap<K, V>) maps.get(id);
+        MVBTreeMap<K, V> map = (MVBTreeMap<K, V>) maps.get(id);
         return map;
     }
 
@@ -2189,8 +2189,8 @@ public final class BTreeWithMVCC {
          *
          * @return the opened store
          */
-        public BTreeWithMVCC open() {
-            return new BTreeWithMVCC(config);
+        public BTreeForest open() {
+            return new BTreeForest(config);
         }
 
         @Override

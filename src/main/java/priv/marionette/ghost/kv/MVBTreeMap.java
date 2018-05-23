@@ -1,4 +1,4 @@
-package priv.marionette.ghost.btree;
+package priv.marionette.ghost.kv;
 
 import priv.marionette.ghost.type.DataType;
 import priv.marionette.ghost.type.ObjectDataType;
@@ -24,10 +24,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * @author Yue Yu
  * @create 2018-03-26 下午3:06
  **/
-public class MVMap<K,V> extends AbstractMap<K, V>
+public class MVBTreeMap<K,V> extends AbstractMap<K, V>
         implements ConcurrentMap<K, V> {
 
-    protected BTreeWithMVCC bTree;
+    protected BTreeForest bTree;
 
     /**
      * Reference to the current root page.
@@ -49,8 +49,8 @@ public class MVMap<K,V> extends AbstractMap<K, V>
      */
     static final long INITIAL_VERSION = -1;
 
-    protected MVMap(Map<String, Object> config) {
-        this((BTreeWithMVCC) config.get("store"),
+    protected MVBTreeMap(Map<String, Object> config) {
+        this((BTreeForest) config.get("store"),
                 (DataType) config.get("key"),
                 (DataType) config.get("val"),
                 DataUtils.readHexInt(config, "id", 0),
@@ -61,19 +61,19 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     }
 
     // constructor for cloneIt()
-    protected MVMap(MVMap<K, V> source) {
+    protected MVBTreeMap(MVBTreeMap<K, V> source) {
         this(source.bTree, source.keyType, source.valueType, source.id, source.createVersion,
                 new AtomicReference<>(source.root.get()));
     }
 
     // meta map constructor
-    MVMap(BTreeWithMVCC bTree) {
+    MVBTreeMap(BTreeForest bTree) {
         this(bTree, StringDataType.INSTANCE,StringDataType.INSTANCE, 0, 0, new AtomicReference<RootReference>());
         setInitialRoot(createEmptyLeaf(), bTree.getCurrentVersion());
     }
 
-    private MVMap(BTreeWithMVCC bTree, DataType keyType, DataType valueType, int id, long createVersion,
-                  AtomicReference<RootReference> root) {
+    private MVBTreeMap(BTreeForest bTree, DataType keyType, DataType valueType, int id, long createVersion,
+                       AtomicReference<RootReference> root) {
         this.bTree = bTree;
         this.id = id;
         this.createVersion = createVersion;
@@ -355,7 +355,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         return id;
     }
 
-    public BTreeWithMVCC getBTree() {
+    public BTreeForest getBTree() {
         return bTree;
     }
 
@@ -464,7 +464,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
 
             @Override
             public int size() {
-                return MVMap.this.size();
+                return MVBTreeMap.this.size();
             }
 
             @Override
@@ -672,12 +672,12 @@ public class MVMap<K,V> extends AbstractMap<K, V>
 
             @Override
             public int size() {
-                return MVMap.this.size();
+                return MVBTreeMap.this.size();
             }
 
             @Override
             public boolean contains(Object o) {
-                return MVMap.this.containsKey(o);
+                return MVBTreeMap.this.containsKey(o);
             }
 
         };
@@ -739,7 +739,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
     }
 
 
-    public final MVMap<K, V> openVersion(long version) {
+    public final MVBTreeMap<K, V> openVersion(long version) {
         if (readOnly) {
             throw DataUtils.newUnsupportedOperationException(
                     "This map is read-only; need to call " +
@@ -756,28 +756,28 @@ public class MVMap<K,V> extends AbstractMap<K, V>
 
         if (rootReference == null) {
             // smaller than all in-memory versions
-            MVMap<K, V> map = openReadOnly(bTree.getRootPos(getId(), version), version);
+            MVBTreeMap<K, V> map = openReadOnly(bTree.getRootPos(getId(), version), version);
             return map;
         }
-        MVMap<K, V> m = openReadOnly(rootReference.root, version);
+        MVBTreeMap<K, V> m = openReadOnly(rootReference.root, version);
         assert m.getVersion() <= version : m.getVersion() + " <= " + version;
         return m;
     }
 
-    final MVMap<K, V> openReadOnly(long rootPos, long version) {
+    final MVBTreeMap<K, V> openReadOnly(long rootPos, long version) {
         Page root = readOrCreateRootPage(rootPos);
         return openReadOnly(root, version);
     }
 
-    private MVMap<K, V> openReadOnly(Page root, long version) {
-        MVMap<K, V> m = cloneIt();
+    private MVBTreeMap<K, V> openReadOnly(Page root, long version) {
+        MVBTreeMap<K, V> m = cloneIt();
         m.readOnly = true;
         m.setInitialRoot(root, version);
         return m;
     }
 
-    protected MVMap<K, V> cloneIt() {
-        return new MVMap<>(this);
+    protected MVBTreeMap<K, V> cloneIt() {
+        return new MVBTreeMap<>(this);
     }
 
     public final Cursor<K, V> cursor(K from) {
@@ -965,9 +965,9 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         public void reset() {}
     }
 
-    public interface MapBuilder<M extends MVMap<K, V>, K, V> {
+    public interface MapBuilder<M extends MVBTreeMap<K, V>, K, V> {
 
-        M create(BTreeWithMVCC bTree, Map<String, Object> config);
+        M create(BTreeForest bTree, Map<String, Object> config);
 
         DataType getKeyType();
 
@@ -979,7 +979,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
 
     }
 
-    public abstract static class BasicBuilder<M extends MVMap<K, V>, K, V> implements MapBuilder<M, K, V> {
+    public abstract static class BasicBuilder<M extends MVBTreeMap<K, V>, K, V> implements MapBuilder<M, K, V> {
 
         private DataType keyType;
         private DataType valueType;
@@ -1018,7 +1018,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         }
 
         @Override
-        public M create(BTreeWithMVCC btree, Map<String, Object> config) {
+        public M create(BTreeForest btree, Map<String, Object> config) {
             if (getKeyType() == null) {
                 setKeyType(new ObjectDataType());
             }
@@ -1037,7 +1037,7 @@ public class MVMap<K,V> extends AbstractMap<K, V>
 
     }
 
-    public static class Builder<K, V> extends BasicBuilder<MVMap<K, V>, K, V> {
+    public static class Builder<K, V> extends BasicBuilder<MVBTreeMap<K, V>, K, V> {
 
         public Builder() {}
 
@@ -1054,10 +1054,10 @@ public class MVMap<K,V> extends AbstractMap<K, V>
         }
 
         @Override
-        protected MVMap<K, V> create(Map<String, Object> config) {
+        protected MVBTreeMap<K, V> create(Map<String, Object> config) {
             Object type = config.get("type");
             if(type == null || type.equals("rtree")) {
-                return new MVMap<>(config);
+                return new MVBTreeMap<>(config);
             }
             throw new IllegalArgumentException("Incompatible map type");
         }

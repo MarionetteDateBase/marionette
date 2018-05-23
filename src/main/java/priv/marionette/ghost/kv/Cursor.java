@@ -1,4 +1,4 @@
-package priv.marionette.ghost.btree;
+package priv.marionette.ghost.kv;
 
 import priv.marionette.tools.DataUtils;
 
@@ -129,7 +129,7 @@ public class Cursor<K, V> implements Iterator<K> {
             while ((parent = cp.parent) != null) cp = parent;
             Page root = cp.page;
             @SuppressWarnings("unchecked")
-            MVMap<K, ?> map = (MVMap<K, ?>) root.map;
+            MVBTreeMap<K, ?> map = (MVBTreeMap<K, ?>) root.map;
             long index = map.getKeyIndex(next());
             last = map.getKey(index + n);
             this.cursorPos = traverseDown(root, last);
