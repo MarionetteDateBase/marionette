@@ -283,12 +283,7 @@ public final class CompressLZF implements Compressor {
         } while (outPos < outLen);
     }
 
-    /**
-     * Expand a number of compressed bytes.
-     *
-     * @param in the compressed data
-     * @param out the output area
-     */
+
     public static void expand(ByteBuffer in, ByteBuffer out) {
         do {
             int ctrl = in.get() & 255;
