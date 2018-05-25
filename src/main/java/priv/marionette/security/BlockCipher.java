@@ -6,13 +6,12 @@ package priv.marionette.security;
 public interface BlockCipher {
 
     /**
-     * Blocks sizes are always multiples of this number.
+     * 块的大小
      */
     int ALIGN = 16;
 
     /**
-     * Set the encryption key used for encrypting and decrypting.
-     * The key needs to be 16 bytes long.
+     * 用来加密的key，key的长度为16个字节
      *
      * @param key the key
      */
