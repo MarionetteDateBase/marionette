@@ -30,7 +30,7 @@ public class MVBTreeMap<K,V> extends AbstractMap<K, V>
     protected BTreeForest bTree;
 
     /**
-     * Reference to the current root page.
+     * 指向当前根节点的引用
      */
     private final AtomicReference<RootReference> root;
 
@@ -43,10 +43,6 @@ public class MVBTreeMap<K,V> extends AbstractMap<K, V>
     private boolean readOnly;
     private boolean isVolatile;
 
-    /**
-     * This designates the "last stored" version for a store which was
-     * just open for the first time.
-     */
     static final long INITIAL_VERSION = -1;
 
     protected MVBTreeMap(Map<String, Object> config) {
@@ -834,7 +830,7 @@ public class MVBTreeMap<K,V> extends AbstractMap<K, V>
             this.lockedForUpdate = lockedForUpdate;
         }
 
-        // This one is used for locking
+        // 被锁时使用
         RootReference(RootReference r) {
             this.root = r.root;
             this.version = r.version;
@@ -844,7 +840,7 @@ public class MVBTreeMap<K,V> extends AbstractMap<K, V>
             this.lockedForUpdate = true;
         }
 
-        // This one is used for unlocking
+        // 没被锁时使用
         RootReference(RootReference r, Page root, int attempt) {
             this.root = root;
             this.version = r.version;
@@ -854,7 +850,6 @@ public class MVBTreeMap<K,V> extends AbstractMap<K, V>
             this.lockedForUpdate = false;
         }
 
-        // This one is used for version change
         RootReference(RootReference r, long version, int attempt) {
             RootReference previous = r;
             RootReference tmp;
@@ -869,7 +864,6 @@ public class MVBTreeMap<K,V> extends AbstractMap<K, V>
             this.lockedForUpdate = r.lockedForUpdate;
         }
 
-        // This one is used for r/o snapshots
         RootReference(Page root, long version) {
             this.root = root;
             this.version = version;
