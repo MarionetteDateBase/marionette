@@ -6,13 +6,12 @@ import java.io.IOException;
 import java.io.OutputStream;
 
 /**
- * An output stream to write an LZF stream.
- * The data is automatically compressed.
+ * 压缩输入流
  */
 public class LZFOutputStream extends OutputStream {
 
     /**
-     * The file header of a LZF file.
+     * Magic Header
      */
     static final int MAGIC = ('H' << 24) | ('2' << 16) | ('I' << 8) | 'S';
 

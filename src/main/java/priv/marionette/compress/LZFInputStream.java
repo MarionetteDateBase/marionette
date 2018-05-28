@@ -7,8 +7,7 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * An input stream to read from an LZF stream.
- * The data is automatically expanded.
+ * 将LZFStream解压缩
  */
 public class LZFInputStream extends InputStream {
 
