@@ -13,7 +13,7 @@ public class LZFOutputStream extends OutputStream {
     /**
      * Magic Header
      */
-    static final int MAGIC = ('H' << 24) | ('2' << 16) | ('I' << 8) | 'S';
+    static final int MAGIC = ('M' << 24) | ('A' << 16) | ('R' << 8) | 'I';
 
     private final OutputStream out;
     private final CompressLZF compress = new CompressLZF();
@@ -30,7 +30,6 @@ public class LZFOutputStream extends OutputStream {
     }
 
     private void ensureOutput(int len) {
-        // TODO calculate the maximum overhead (worst case) for the output
         // buffer
         int outputLen = (len < 100 ? len + 100 : len) * 2;
         if (outBuffer == null || outBuffer.length < outputLen) {
