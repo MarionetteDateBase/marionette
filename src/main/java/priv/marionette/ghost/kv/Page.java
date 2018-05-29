@@ -540,7 +540,7 @@ public abstract class Page implements Cloneable{
     abstract Page copy(MVBTreeMap<?, ?> map);
 
     /**
-     * Create a copy of this page.
+     * 创建当前节点的拷贝
      *
      * @return a mutable copy of this page
      */
