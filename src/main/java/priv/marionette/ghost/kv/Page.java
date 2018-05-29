@@ -942,13 +942,10 @@ public abstract class Page implements Cloneable{
     private static final class NonLeaf extends Page
     {
         /**
-         * The child page references.
+         * 子节点的引用
          */
         private PageReference[] children;
 
-        /**
-         * The total entry count of this page and all children.
-         */
         private long totalCount;
 
         NonLeaf(MVBTreeMap<?, ?> map) {
