@@ -2018,15 +2018,8 @@ public final class BTreeForest {
         }
 
         /**
-         * Set the auto-compact target fill rate. If the average fill rate (the
-         * percentage of the storage space that contains active data) of the
-         * chunks is lower, then the chunks with a low fill rate are re-written.
-         * Also, if the percentage of empty space between chunks is higher than
-         * this value, then chunks at the end of the file are moved. Compaction
-         * stops if the target fill rate is reached.
-         * <p>
-         * The default value is 40 (40%). The value 0 disables auto-compacting.
-         * <p>
+         * 如果一个chunk的填充率低于目标填充率，则重写chunk。如果chunks之间的empty space的百分比
+         * 大于目标填充率，则remove文件的最后一个chunk，直到小于目标填充率
          *
          * @param percent the target fill rate
          * @return this
@@ -2036,8 +2029,7 @@ public final class BTreeForest {
         }
 
         /**
-         * Use the following file name. If the file does not exist, it is
-         * automatically created. The parent directory already must exist.
+         * 打开下列filename的文件，如果文件不存在则创建一个
          *
          * @param fileName the file name
          * @return this
@@ -2078,7 +2070,7 @@ public final class BTreeForest {
         }
 
         /**
-         * Set the read cache size in MB. The default is 16 MB.
+         * 设置缓存大小(MB),默认为16MB
          *
          * @param mb the cache size in megabytes
          * @return this
