@@ -2039,12 +2039,7 @@ public final class BTreeForest {
         }
 
         /**
-         * Encrypt / decrypt the file using the given password. This method has
-         * no effect for in-memory stores. The password is passed as a
-         * char array so that it can be cleared as soon as possible. Please note
-         * there is still a small risk that password stays in memory (due to
-         * Java garbage collection). Also, the hashed encryption key is kept in
-         * memory as long as the file is open.
+         * 通过一个char array维护的password来加密/解密数据
          *
          * @param password the password
          * @return this
@@ -2080,8 +2075,7 @@ public final class BTreeForest {
         }
 
         /**
-         * Set the read cache concurrency. The default is 16, meaning 16
-         * segments are used.
+         * 设置读read cache的并发段数
          *
          * @param concurrency the cache concurrency
          * @return this
