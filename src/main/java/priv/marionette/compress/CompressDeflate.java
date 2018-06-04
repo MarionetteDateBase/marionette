@@ -9,15 +9,7 @@ import java.util.zip.Deflater;
 import java.util.zip.Inflater;
 
 /**
- * This is a wrapper class for the Deflater class.
- * This algorithm supports the following options:
- * <ul>
- * <li>l or level: -1 (default), 0 (no compression),
- *  1 (best speed), ..., 9 (best compression)
- * </li><li>s or strategy: 0 (default),
- *  1 (filtered), 2 (huffman only)
- * </li></ul>
- * See also java.util.zip.Deflater for details.
+ * jdk默认压缩算法封装类
  */
 public class CompressDeflate implements Compressor {
 
