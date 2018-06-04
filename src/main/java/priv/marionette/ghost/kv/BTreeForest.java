@@ -2049,14 +2049,8 @@ public final class BTreeForest {
         }
 
         /**
-         * Open the file in read-only mode. In this case, a shared lock will be
-         * acquired to ensure the file is not concurrently opened in write mode.
-         * <p>
-         * If this option is not used, the file is locked exclusively.
-         * <p>
-         * Please note a store may only be opened once in every JVM (no matter
-         * whether it is opened in read-only or read-write mode), because each
-         * file may be locked only once in a process.
+         * 以只读模式打开文件，此时给文件加上一个share lock来保证不以write模式访问文件。
+         * 如果不以这种模式打开文件，将给文件加上excessive lock
          *
          * @return this
          */
@@ -2103,11 +2097,7 @@ public final class BTreeForest {
         }
 
         /**
-         * Set the amount of memory a page should contain at most, in bytes,
-         * before it is split. The default is 16 KB for persistent stores and 4
-         * KB for in-memory stores. This is not a limit in the page size, as
-         * pages with one entry can get larger. It is just the point where pages
-         * that contain more than one entry are split.
+         * 设置一个page node最多能持有的容量，内存中是4kb，持久化最多16kb，超过则进行分裂
          *
          * @param pageSplitSize the page size
          * @return this
@@ -2129,14 +2119,7 @@ public final class BTreeForest {
         }
 
         /**
-         * Use the provided file store instead of the default one.
-         * <p>
-         * File stores passed in this way need to be open. They are not closed
-         * when closing the store.
-         * <p>
-         * Please note that any kind of store (including an off-heap store) is
-         * considered a "persistence", while an "in-memory store" means objects
-         * are not persisted and fully kept in the JVM heap.
+         * 使用特定的fileStore
          *
          * @param store the file store
          * @return this
