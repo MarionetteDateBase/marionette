@@ -2099,13 +2099,7 @@ public final class BTreeForest {
         }
 
         /**
-         * Compress data before writing using the LZF algorithm. This will save
-         * about 50% of the disk space, but will slow down read and write
-         * operations slightly.
-         * <p>
-         * This setting only affects writes; it is not necessary to enable
-         * compression when reading, even if compression was enabled when
-         * writing.
+         * 使用LZF算法压缩数据，可以节约一半左右的磁盘空间，但是会拖慢读写速度
          *
          * @return this
          */
@@ -2114,13 +2108,7 @@ public final class BTreeForest {
         }
 
         /**
-         * Compress data before writing using the Deflate algorithm. This will
-         * save more disk space, but will slow down read and write operations
-         * quite a bit.
-         * <p>
-         * This setting only affects writes; it is not necessary to enable
-         * compression when reading, even if compression was enabled when
-         * writing.
+         * 使用默认算法压缩，对读写速度的影响较小
          *
          * @return this
          */
