@@ -646,7 +646,7 @@ public final class BTreeForest {
             time = Math.max(lastChunk.time, time);
         }
         int newChunkId = lastChunkId;
-        while (true) {
+        for(;;) {
             newChunkId = (newChunkId + 1) & Chunk.MAX_ID;
             Chunk old = chunks.get(newChunkId);
             if (old == null) {
